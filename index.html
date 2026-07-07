@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quake Globe — Live USGS Earthquakes in 3D</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<div id="canvas-wrap"></div>
+<div id="loading">Loading earthquakes…</div>
+
+<div id="panel">
+  <h1>🌍 Quake Globe</h1>
+  <div class="sub">Live data · USGS Earthquake Hazards Program</div>
+  <div class="ctrl">
+    <label for="feed">Time window</label>
+    <select id="feed">
+      <option value="all_hour">Past hour (all)</option>
+      <option value="all_day" selected>Past 24 hours (all)</option>
+      <option value="2.5_week">Past 7 days (M2.5+)</option>
+      <option value="4.5_month">Past 30 days (M4.5+)</option>
+      <option value="all_month">Past 30 days (all)</option>
+    </select>
+  </div>
+  <div class="ctrl">
+    <label class="row"><span>Min magnitude</span><span id="magVal">0.0</span></label>
+    <input type="range" id="minMag" min="0" max="7" step="0.1" value="0">
+  </div>
+  <div class="ctrl">
+    <label class="toggle"><input type="checkbox" id="spin" checked> Auto-rotate</label>
+  </div>
+  <div id="stats">
+    Showing <b id="count">0</b> quakes<br>
+    Strongest: <b id="maxMag">–</b><br>
+    <span class="hint">Drag to rotate · scroll to zoom · click a quake</span>
+  </div>
+</div>
+
+<div id="legend">
+  <b class="legend-title">Magnitude</b>
+  <div class="lg"><span class="dot" style="background:#4ade80"></span> &lt; 3.0</div>
+  <div class="lg"><span class="dot" style="background:#facc15"></span> 3.0 – 4.5</div>
+  <div class="lg"><span class="dot" style="background:#fb923c"></span> 4.5 – 6.0</div>
+  <div class="lg"><span class="dot" style="background:#ef4444"></span> ≥ 6.0</div>
+</div>
+
+<div id="tooltip"></div>
+<div id="detail"><span class="close" id="detailClose">×</span><div id="detailBody"></div></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

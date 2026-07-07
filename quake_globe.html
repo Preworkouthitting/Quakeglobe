@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quake Globe — Live USGS Earthquakes in 3D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #05070d; color: #dfe6f0; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+  #canvas-wrap { position: fixed; inset: 0; }
+  canvas { display: block; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+
+  #panel {
+    position: fixed; top: 16px; left: 16px; width: 250px;
+    background: rgba(10, 14, 24, 0.82); backdrop-filter: blur(8px);
+    border: 1px solid rgba(120, 160, 255, 0.18); border-radius: 12px;
+    padding: 16px; z-index: 10;
+  }
+  #panel h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.4px; margin-bottom: 2px; }
+  #panel .sub { font-size: 11px; color: #7d8aa5; margin-bottom: 14px; }
+  .ctrl { margin-bottom: 12px; }
+  .ctrl label { display: block; font-size: 11px; color: #9fb0cc; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.6px; }
+  select {
+    width: 100%; background: #131a2b; color: #dfe6f0; border: 1px solid #2a3550;
+    border-radius: 6px; padding: 6px 8px; font-size: 13px; cursor: pointer;
+  }
+  input[type=range] { width: 100%; accent-color: #ff8c42; cursor: pointer; }
+  .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9fb0cc; cursor: pointer; }
+  #stats { border-top: 1px solid rgba(120,160,255,0.15); padding-top: 10px; font-size: 12px; line-height: 1.7; color: #9fb0cc; }
+  #stats b { color: #dfe6f0; }
+  #legend { position: fixed; bottom: 16px; left: 16px; z-index: 10; font-size: 11px; color: #9fb0cc;
+    background: rgba(10,14,24,0.82); border: 1px solid rgba(120,160,255,0.18); border-radius: 10px; padding: 10px 14px; }
+  .lg { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 20; display: none;
+    background: rgba(8, 12, 22, 0.95); border: 1px solid rgba(255,140,66,0.5);
+    border-radius: 8px; padding: 10px 12px; font-size: 12px; max-width: 260px; line-height: 1.55;
+  }
+  #tooltip .mag { font-size: 16px; font-weight: 700; color: #ff8c42; }
+  #tooltip .place { color: #dfe6f0; }
+  #tooltip .meta { color: #7d8aa5; font-size: 11px; }
+
+  #detail {
+    position: fixed; top: 16px; right: 16px; width: 270px; z-index: 10; display: none;
+    background: rgba(10,14,24,0.88); border: 1px solid rgba(255,140,66,0.4);
+    border-radius: 12px; padding: 16px;
+  }
+  #detail .mag { font-size: 26px; font-weight: 700; color: #ff8c42; }
+  #detail .place { font-size: 13px; margin: 4px 0 10px; }
+  #detail .meta { font-size: 12px; color: #9fb0cc; line-height: 1.8; }
+  #detail a { color: #6ab0ff; font-size: 12px; }
+  #detail .close { position: absolute; top: 8px; right: 12px; cursor: pointer; color: #7d8aa5; font-size: 16px; }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    z-index: 30; font-size: 13px; color: #9fb0cc; background: rgba(5,7,13,0.6); }
+</style>
+</head>
+<body>
+<div id="canvas-wrap"></div>
+<div id="loading">Loading earthquakes…</div>
+
+<div id="panel">
+  <h1>🌍 Quake Globe</h1>
+  <div class="sub">Live data · USGS Earthquake Hazards Program</div>
+  <div class="ctrl">
+    <label>Time window</label>
+    <select id="feed">
+      <option value="all_hour">Past hour (all)</option>
+      <option value="all_day" selected>Past 24 hours (all)</option>
+      <option value="2.5_week">Past 7 days (M2.5+)</option>
+      <option value="4.5_month">Past 30 days (M4.5+)</option>
+    </select>
+  </div>
+  <div class="ctrl">
+    <label class="row"><span>Min magnitude</span><span id="magVal">0.0</span></label>
+    <input type="range" id="minMag" min="0" max="7" step="0.1" value="0">
+  </div>
+  <div class="ctrl">
+    <label class="toggle"><input type="checkbox" id="spin" checked> Auto-rotate</label>
+  </div>
+  <div id="stats">
+    Showing <b id="count">0</b> quakes<br>
+    Strongest: <b id="maxMag">–</b><br>
+    <span style="font-size:11px">Drag to rotate · scroll to zoom · click a quake</span>
+  </div>
+</div>
+
+<div id="legend">
+  <b style="color:#dfe6f0">Magnitude</b>
+  <div class="lg"><span class="dot" style="background:#4ade80"></span> &lt; 3.0</div>
+  <div class="lg"><span class="dot" style="background:#facc15"></span> 3.0 – 4.5</div>
+  <div class="lg"><span class="dot" style="background:#fb923c"></span> 4.5 – 6.0</div>
+  <div class="lg"><span class="dot" style="background:#ef4444"></span> ≥ 6.0</div>
+</div>
+
+<div id="tooltip"></div>
+<div id="detail"><span class="close" onclick="this.parentElement.style.display='none'">×</span><div id="detailBody"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const R = 100; // globe radius
+
+// ---------- Scene ----------
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 1, 2000);
+camera.position.z = 320;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.getElementById('canvas-wrap').appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+sun.position.set(300, 200, 300);
+scene.add(sun);
+
+// Everything that rotates together
+const world = new THREE.Group();
+scene.add(world);
+
+// Globe
+const globeMat = new THREE.MeshPhongMaterial({ color: 0x1b2a4a, shininess: 8 });
+const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 64, 64), globeMat);
+world.add(globe);
+new THREE.TextureLoader().load(
+  'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+  tex => { globeMat.map = tex; globeMat.color.set(0xffffff); globeMat.needsUpdate = true; },
+  undefined,
+  () => {} // fallback: plain dark-blue sphere
+);
+
+// Atmosphere glow
+const atmo = new THREE.Mesh(
+  new THREE.SphereGeometry(R * 1.04, 64, 64),
+  new THREE.MeshBasicMaterial({ color: 0x3b6fd4, transparent: true, opacity: 0.12, side: THREE.BackSide })
+);
+world.add(atmo);
+
+// Star field
+{
+  const pts = [];
+  for (let i = 0; i < 1200; i++) {
+    // random point on a sphere (Vector3.randomDirection() doesn't exist in r128)
+    const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2;
+    const s = Math.sqrt(1 - u * u), d = 800 + Math.random() * 400;
+    pts.push(s * Math.cos(a) * d, s * Math.sin(a) * d, u * d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8899bb, size: 1.2, sizeAttenuation: true })));
+}
+
+// ---------- Helpers ----------
+function latLonToVec3(lat, lon, r) {
+  const phi = (90 - lat) * Math.PI / 180;
+  const theta = (lon + 180) * Math.PI / 180;
+  return new THREE.Vector3(
+    -r * Math.sin(phi) * Math.cos(theta),
+     r * Math.cos(phi),
+     r * Math.sin(phi) * Math.sin(theta)
+  );
+}
+function magColor(m) {
+  if (m >= 6) return 0xef4444;
+  if (m >= 4.5) return 0xfb923c;
+  if (m >= 3) return 0xfacc15;
+  return 0x4ade80;
+}
+
+// ---------- Quake markers ----------
+const quakeGroup = new THREE.Group();
+world.add(quakeGroup);
+let quakes = [];       // { mesh, ring, data }
+let pulseRings = [];   // rings animated for recent quakes
+
+function clearQuakes() {
+  quakeGroup.children.forEach(c => { c.geometry.dispose(); c.material.dispose(); });
+  while (quakeGroup.children.length) quakeGroup.remove(quakeGroup.children[0]);
+  quakes = [];
+  pulseRings = [];
+}
+
+function buildQuakes(features) {
+  clearQuakes();
+  const now = Date.now();
+  features.forEach(f => {
+    const m = f.properties.mag;
+    if (m === null || m === undefined) return;
+    const coords = f.geometry.coordinates;
+    const lon = coords[0], lat = coords[1], depth = coords[2] || 0;
+    const mag = Math.max(m, 0.1);
+    const h = Math.max(1.5, mag * mag * 0.55);          // spike height by magnitude
+    const w = Math.max(0.4, mag * 0.28);                 // spike width
+    const pos = latLonToVec3(lat, lon, R);
+    const normal = pos.clone().normalize();
+
+    const spike = new THREE.Mesh(
+      new THREE.ConeGeometry(w, h, 6),
+      new THREE.MeshBasicMaterial({ color: magColor(mag), transparent: true, opacity: 0.92 })
+    );
+    // Cone points +Y by default; align +Y with the surface normal, base at surface
+    spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    spike.position.copy(normal.clone().multiplyScalar(R + h / 2));
+    spike.userData = { mag: mag, depth: depth, props: f.properties, lat: lat, lon: lon };
+    quakeGroup.add(spike);
+
+    // Pulsing ring for quakes in the last 2 hours
+    let ring = null;
+    if (now - f.properties.time < 2 * 3600 * 1000) {
+      ring = new THREE.Mesh(
+        new THREE.RingGeometry(1, 1.35, 32),
+        new THREE.MeshBasicMaterial({ color: magColor(mag), transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+      );
+      ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+      ring.position.copy(normal.clone().multiplyScalar(R + 0.3));
+      ring.userData.baseScale = Math.max(1.5, mag * 1.2);
+      quakeGroup.add(ring);
+      pulseRings.push(ring);
+    }
+    quakes.push({ mesh: spike, ring: ring, data: f });
+  });
+  applyMagFilter();
+}
+
+function applyMagFilter() {
+  const min = parseFloat(document.getElementById('minMag').value);
+  let count = 0, max = -Infinity, maxPlace = '';
+  quakes.forEach(q => {
+    const visible = q.mesh.userData.mag >= min;
+    q.mesh.visible = visible;
+    if (q.ring) q.ring.visible = visible;
+    if (visible) {
+      count++;
+      if (q.mesh.userData.mag > max) { max = q.mesh.userData.mag; maxPlace = q.data.properties.place || ''; }
+    }
+  });
+  document.getElementById('count').textContent = count;
+  document.getElementById('maxMag').textContent = count ? 'M' + max.toFixed(1) + ' — ' + maxPlace : '–';
+}
+
+// ---------- Data ----------
+async function loadFeed(feed) {
+  document.getElementById('loading').style.display = 'flex';
+  try {
+    const res = await fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/' + feed + '.geojson');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    buildQuakes(json.features);
+  } catch (e) {
+    document.getElementById('count').textContent = 'load failed';
+    console.error('Feed error:', e);
+  }
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ---------- Interaction: drag / zoom ----------
+let dragging = false, px = 0, py = 0, vx = 0, vy = 0, moved = 0;
+renderer.domElement.addEventListener('pointerdown', e => { dragging = true; moved = 0; px = e.clientX; py = e.clientY; });
+addEventListener('pointerup', () => dragging = false);
+addEventListener('pointermove', e => {
+  if (dragging) {
+    const dx = e.clientX - px, dy = e.clientY - py;
+    moved += Math.abs(dx) + Math.abs(dy);
+    vx = dx * 0.005; vy = dy * 0.005;
+    world.rotation.y += vx;
+    world.rotation.x = Math.max(-1.2, Math.min(1.2, world.rotation.x + vy));
+    px = e.clientX; py = e.clientY;
+  }
+  handleHover(e);
+});
+renderer.domElement.addEventListener('wheel', e => {
+  e.preventDefault();
+  camera.position.z = Math.max(150, Math.min(600, camera.position.z + e.deltaY * 0.3));
+}, { passive: false });
+
+// ---------- Interaction: hover / click ----------
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tooltip = document.getElementById('tooltip');
+let hovered = null;
+
+function pick(e) {
+  mouse.x = (e.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(quakes.filter(q => q.mesh.visible).map(q => q.mesh));
+  return hits.length ? hits[0].object : null;
+}
+
+function handleHover(e) {
+  const hit = pick(e);
+  if (hovered && hovered !== hit) { hovered.material.opacity = 0.92; hovered = null; }
+  if (hit) {
+    hovered = hit;
+    hit.material.opacity = 1;
+    const p = hit.userData.props;
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX + 14) + 'px';
+    tooltip.style.top = (e.clientY + 14) + 'px';
+    tooltip.innerHTML = '<div class="mag">M' + hit.userData.mag.toFixed(1) + '</div>' +
+      '<div class="place">' + (p.place || 'Unknown location') + '</div>' +
+      '<div class="meta">' + new Date(p.time).toLocaleString() + ' · depth ' + hit.userData.depth.toFixed(0) + ' km</div>';
+    document.body.style.cursor = 'pointer';
+  } else {
+    tooltip.style.display = 'none';
+    document.body.style.cursor = '';
+  }
+}
+
+renderer.domElement.addEventListener('click', e => {
+  if (moved > 6) return; // it was a drag, not a click
+  const hit = pick(e);
+  if (!hit) return;
+  const p = hit.userData.props;
+  document.getElementById('detailBody').innerHTML =
+    '<div class="mag">M' + hit.userData.mag.toFixed(1) + '</div>' +
+    '<div class="place">' + (p.place || 'Unknown location') + '</div>' +
+    '<div class="meta">' +
+      'Time: ' + new Date(p.time).toLocaleString() + '<br>' +
+      'Depth: ' + hit.userData.depth.toFixed(1) + ' km<br>' +
+      'Coords: ' + hit.userData.lat.toFixed(2) + ', ' + hit.userData.lon.toFixed(2) + '<br>' +
+      (p.tsunami ? '⚠️ Tsunami flag raised<br>' : '') +
+      'Felt reports: ' + (p.felt || 0) +
+    '</div>' +
+    '<a href="' + p.url + '" target="_blank" rel="noopener">View on USGS →</a>';
+  document.getElementById('detail').style.display = 'block';
+});
+
+// ---------- UI ----------
+document.getElementById('feed').addEventListener('change', e => loadFeed(e.target.value));
+document.getElementById('minMag').addEventListener('input', e => {
+  document.getElementById('magVal').textContent = parseFloat(e.target.value).toFixed(1);
+  applyMagFilter();
+});
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---------- Loop ----------
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  if (document.getElementById('spin').checked && !dragging) world.rotation.y += 0.0009;
+  if (!dragging) { world.rotation.y += vx * 0.95; vx *= 0.93; } // inertia
+  pulseRings.forEach((r, i) => {
+    const s = r.userData.baseScale * (1 + 0.5 * Math.sin(t * 3 + i));
+    r.scale.set(s, s, s);
+    r.material.opacity = 0.35 + 0.35 * Math.sin(t * 3 + i);
+  });
+  renderer.render(scene, camera);
+}
+animate();
+loadFeed('all_day');
+</script>
+</body>
+</html>
