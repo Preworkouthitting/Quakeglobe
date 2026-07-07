@@ -18,6 +18,9 @@ export const els = {
   detail: $('detail'),
   detailBody: $('detailBody'),
   detailClose: $('detailClose'),
+  playBtn: $('playBtn'),
+  scrub: $('scrub'),
+  timeLabel: $('timeLabel'),
 };
 
 export function setLoading(on) {

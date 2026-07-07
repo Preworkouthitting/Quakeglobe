@@ -51,5 +51,22 @@ input[type=range] { width: 100%; accent-color: #ff8c42; cursor: pointer; }
 #detail a { color: #6ab0ff; font-size: 12px; }
 #detail .close { position: absolute; top: 8px; right: 12px; cursor: pointer; color: #7d8aa5; font-size: 16px; }
 
+#timeline {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; z-index: 10;
+  width: min(560px, calc(100vw - 380px));
+  background: rgba(10,14,24,0.82); backdrop-filter: blur(8px);
+  border: 1px solid rgba(120,160,255,0.18); border-radius: 12px;
+  padding: 10px 16px;
+}
+#playBtn {
+  background: #131a2b; color: #ff8c42; border: 1px solid #2a3550;
+  border-radius: 6px; width: 30px; height: 26px; font-size: 12px;
+  cursor: pointer; flex-shrink: 0;
+}
+#playBtn:hover { border-color: rgba(255,140,66,0.5); }
+#timeline input[type=range] { flex: 1; }
+#timeLabel { font-size: 11px; color: #9fb0cc; white-space: nowrap; min-width: 118px; text-align: right; }
+
 #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   z-index: 30; font-size: 13px; color: #9fb0cc; background: rgba(5,7,13,0.6); }

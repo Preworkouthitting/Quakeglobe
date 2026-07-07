@@ -3,6 +3,7 @@ import { createScene } from './scene.js';
 import { createGlobe } from './globe.js';
 import { QuakeMarkers } from './markers.js';
 import { fetchFeed } from './data.js';
+import { Timeline } from './timeline.js';
 import * as ui from './ui.js';
 
 const app = createScene(document.getElementById('canvas-wrap'));
@@ -12,12 +13,31 @@ app.scene.add(globe.group);
 const markers = new QuakeMarkers(app.scene);
 app.onTick(t => markers.update(t));
 
+// ---------- Timeline ----------
+const timeline = new Timeline({
+  onTime(cutoff, { flash, atEnd }) {
+    markers.setTimeCutoff(cutoff, { flash });
+    ui.updateStats(markers.visibleStats());
+    ui.els.scrub.value = Math.round(timeline.frac() * 1000);
+    ui.els.timeLabel.textContent = atEnd ? 'now' : new Date(cutoff).toLocaleString();
+  },
+  onPlayState(playing) {
+    ui.els.playBtn.textContent = playing ? '❚❚' : '▶';
+  },
+});
+app.onTick((t, dt) => timeline.tick(dt));
+
+ui.els.playBtn.addEventListener('click', () => timeline.toggle());
+ui.els.scrub.addEventListener('input', e => timeline.seek(e.target.value / 1000));
+
 // ---------- Data ----------
 async function loadFeed(feed) {
   ui.setLoading(true);
   try {
     const features = await fetchFeed(feed);
     markers.setData(features);
+    const extent = markers.timeExtent();
+    if (extent) timeline.setWindow(extent[0], extent[1]);
     ui.updateStats(markers.visibleStats());
   } catch (e) {
     console.error('Feed error:', e);
@@ -78,7 +98,7 @@ ui.els.feed.addEventListener('change', e => loadFeed(e.target.value));
 ui.els.minMag.addEventListener('input', e => {
   const v = parseFloat(e.target.value);
   ui.els.magVal.textContent = v.toFixed(1);
-  markers.applyFilter(v);
+  markers.setMinMag(v);
   ui.updateStats(markers.visibleStats());
 });
 ui.els.spin.addEventListener('change', e => {

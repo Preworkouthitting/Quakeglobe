@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { R, latLonToVec3 } from './scene.js';
 
 const CAPACITY = 15000; // all_month is ~10k events; leave headroom
+const FLASH_MS = 1400;  // how long a quake glows after "occurring" in playback
 
 export function magColor(m) {
   if (m >= 6) return 0xef4444;
@@ -20,6 +21,7 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
 // All quake spikes live in a single InstancedMesh; per-quake records keep the
 // feature data and the instanceId ↔ quake mapping for raycast picking.
+// Visibility = mag ≥ minMag AND event time ≤ timeCutoff (timeline scrubber).
 export class QuakeMarkers {
   constructor(parent) {
     // Unit cone, base at origin, tip at +Y — per-instance scale sets width/height
@@ -38,12 +40,15 @@ export class QuakeMarkers {
     this.quakes = [];      // per-instance records, index === instanceId
     this.pulseRings = [];
     this.minMag = 0;
+    this.timeCutoff = Infinity;
+    this.flashing = new Set(); // instanceIds currently flashing
     this.hoveredId = null;
   }
 
   setData(features) {
     this.clearRings();
     this.hoveredId = null;
+    this.flashing.clear();
     const now = Date.now();
 
     this.quakes = features.slice(0, CAPACITY).map(f => {
@@ -52,6 +57,7 @@ export class QuakeMarkers {
       const normal = latLonToVec3(lat, lon, 1);
       return {
         feature: f,
+        time: f.properties.time,
         mag, lat, lon, depth: depth || 0,
         normal,
         h: Math.max(1.5, mag * mag * 0.55),
@@ -59,6 +65,7 @@ export class QuakeMarkers {
         color: magColor(mag),
         recent: now - f.properties.time < 2 * 3600 * 1000,
         shown: true,
+        flashUntil: 0,
       };
     });
 
@@ -67,22 +74,44 @@ export class QuakeMarkers {
       this.mesh.setColorAt(i, _color.set(q.color));
       if (q.recent) this.addPulseRing(q);
     });
-    this.applyFilter(this.minMag);
+    this.timeCutoff = Infinity;
+    this.updateVisibility();
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
-  writeMatrix(i, q) {
+  writeMatrix(i, q, boost = 1) {
     _quat.setFromUnitVectors(UP, q.normal);
-    _scale.set(q.w, q.h, q.w);
+    _scale.set(q.w * boost, q.h * boost, q.w * boost);
     _mat4.compose(q.normal.clone().multiplyScalar(R), _quat, _scale);
     this.mesh.setMatrixAt(i, _mat4);
   }
 
+  setMinMag(v) {
+    this.minMag = v;
+    this.updateVisibility();
+  }
+
+  // Move the timeline cutoff. flash=true (playback, not seek) makes quakes
+  // whose time was just crossed glow bright, then settle.
+  setTimeCutoff(t, { flash = false } = {}) {
+    const prev = this.timeCutoff;
+    this.timeCutoff = t;
+    if (flash && t > prev) {
+      const nowMs = performance.now();
+      this.quakes.forEach((q, i) => {
+        if (q.time > prev && q.time <= t && q.mag >= this.minMag) {
+          q.flashUntil = nowMs + FLASH_MS;
+          this.flashing.add(i);
+        }
+      });
+    }
+    this.updateVisibility();
+  }
+
   // Hidden instances get a zero-scale matrix: not rendered, not raycast-hittable
-  applyFilter(minMag) {
-    this.minMag = minMag;
+  updateVisibility() {
     this.quakes.forEach((q, i) => {
-      q.shown = q.mag >= minMag;
+      q.shown = q.mag >= this.minMag && q.time <= this.timeCutoff;
       if (q.shown) this.writeMatrix(i, q);
       else this.mesh.setMatrixAt(i, ZERO);
       if (q.ring) q.ring.visible = q.shown;
@@ -110,7 +139,7 @@ export class QuakeMarkers {
     this.pulseRings = [];
   }
 
-  // → quake record or null. instanceId indexes straight into this.quakes.
+  // → { id, quake } or null. instanceId indexes straight into this.quakes.
   pick(raycaster) {
     const hits = raycaster.intersectObject(this.mesh);
     if (!hits.length) return null;
@@ -121,7 +150,7 @@ export class QuakeMarkers {
 
   setHovered(id) {
     if (this.hoveredId === id) return;
-    if (this.hoveredId !== null) {
+    if (this.hoveredId !== null && !this.flashing.has(this.hoveredId)) {
       const prev = this.quakes[this.hoveredId];
       if (prev) this.mesh.setColorAt(this.hoveredId, _color.set(prev.color));
     }
@@ -139,6 +168,29 @@ export class QuakeMarkers {
       r.scale.set(s, s, s);
       r.material.opacity = 0.35 + 0.35 * Math.sin(t * 3 + i);
     });
+
+    if (this.flashing.size) {
+      const nowMs = performance.now();
+      let colorDirty = false;
+      for (const i of this.flashing) {
+        const q = this.quakes[i];
+        const remain = (q.flashUntil - nowMs) / FLASH_MS;
+        if (remain <= 0 || !q.shown) {
+          this.flashing.delete(i);
+          this.mesh.setColorAt(i, _color.set(q.color));
+          if (q.shown) this.writeMatrix(i, q);
+        } else {
+          // bright white + oversized at birth, easing back to normal
+          this.mesh.setColorAt(i, _color.set(q.color).lerp(WHITE, remain * 0.9));
+          this.writeMatrix(i, q, 1 + remain * 1.6);
+        }
+        colorDirty = true;
+      }
+      if (colorDirty) {
+        if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+        this.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
   }
 
   visibleStats() {
@@ -149,5 +201,16 @@ export class QuakeMarkers {
       if (q.mag > max) { max = q.mag; maxPlace = q.feature.properties.place || ''; }
     }
     return { count, max, maxPlace };
+  }
+
+  // [earliest, latest] event time in the loaded window
+  timeExtent() {
+    if (!this.quakes.length) return null;
+    let min = Infinity, max = -Infinity;
+    for (const q of this.quakes) {
+      if (q.time < min) min = q.time;
+      if (q.time > max) max = q.time;
+    }
+    return [min, max];
   }
 }
