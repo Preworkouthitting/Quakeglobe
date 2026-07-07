@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createScene } from './scene.js';
 import { createGlobe } from './globe.js';
 import { QuakeMarkers } from './markers.js';
+import { createPlateBoundaries } from './plates.js';
 import { fetchFeed } from './data.js';
 import { Timeline } from './timeline.js';
 import * as ui from './ui.js';
@@ -12,6 +13,9 @@ app.scene.add(globe.group);
 
 const markers = new QuakeMarkers(app.scene);
 app.onTick(t => markers.update(t));
+
+const plates = createPlateBoundaries();
+app.scene.add(plates);
 
 // ---------- Timeline ----------
 const timeline = new Timeline({
@@ -103,6 +107,9 @@ ui.els.minMag.addEventListener('input', e => {
 });
 ui.els.spin.addEventListener('change', e => {
   app.controls.autoRotate = e.target.checked;
+});
+ui.els.plates.addEventListener('change', e => {
+  plates.visible = e.target.checked;
 });
 ui.els.depthMode.addEventListener('change', e => {
   const on = e.target.checked;

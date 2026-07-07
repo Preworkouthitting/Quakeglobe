@@ -19,6 +19,7 @@ export const els = {
   detailBody: $('detailBody'),
   detailClose: $('detailClose'),
   depthMode: $('depthMode'),
+  plates: $('plates'),
   legendMag: $('legendMag'),
   legendDepth: $('legendDepth'),
   playBtn: $('playBtn'),
