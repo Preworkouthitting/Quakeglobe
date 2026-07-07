@@ -104,6 +104,13 @@ ui.els.minMag.addEventListener('input', e => {
 ui.els.spin.addEventListener('change', e => {
   app.controls.autoRotate = e.target.checked;
 });
+ui.els.depthMode.addEventListener('change', e => {
+  const on = e.target.checked;
+  markers.setMode(on ? 'depth' : 'surface');
+  globe.setDepthMode(on);
+  ui.els.legendMag.style.display = on ? 'none' : '';
+  ui.els.legendDepth.style.display = on ? '' : 'none';
+});
 
 loadFeed(ui.els.feed.value);
 

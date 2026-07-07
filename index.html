@@ -30,6 +30,9 @@
   <div class="ctrl">
     <label class="toggle"><input type="checkbox" id="spin" checked> Auto-rotate</label>
   </div>
+  <div class="ctrl">
+    <label class="toggle"><input type="checkbox" id="depthMode"> Depth view</label>
+  </div>
   <div id="stats">
     Showing <b id="count">0</b> quakes<br>
     Strongest: <b id="maxMag">–</b><br>
@@ -38,11 +41,21 @@
 </div>
 
 <div id="legend">
-  <b class="legend-title">Magnitude</b>
-  <div class="lg"><span class="dot" style="background:#4ade80"></span> &lt; 3.0</div>
-  <div class="lg"><span class="dot" style="background:#facc15"></span> 3.0 – 4.5</div>
-  <div class="lg"><span class="dot" style="background:#fb923c"></span> 4.5 – 6.0</div>
-  <div class="lg"><span class="dot" style="background:#ef4444"></span> ≥ 6.0</div>
+  <div id="legendMag">
+    <b class="legend-title">Magnitude</b>
+    <div class="lg"><span class="dot" style="background:#4ade80"></span> &lt; 3.0</div>
+    <div class="lg"><span class="dot" style="background:#facc15"></span> 3.0 – 4.5</div>
+    <div class="lg"><span class="dot" style="background:#fb923c"></span> 4.5 – 6.0</div>
+    <div class="lg"><span class="dot" style="background:#ef4444"></span> ≥ 6.0</div>
+  </div>
+  <div id="legendDepth" style="display:none">
+    <b class="legend-title">Depth</b>
+    <div class="lg"><span class="dot" style="background:#ff8c42"></span> 0 km</div>
+    <div class="lg"><span class="dot" style="background:#facc15"></span> ~165 km</div>
+    <div class="lg"><span class="dot" style="background:#4ade80"></span> ~330 km</div>
+    <div class="lg"><span class="dot" style="background:#38bdf8"></span> ~500 km</div>
+    <div class="lg"><span class="dot" style="background:#8b5cf6"></span> ≥ 660 km</div>
+  </div>
 </div>
 
 <div id="timeline">
