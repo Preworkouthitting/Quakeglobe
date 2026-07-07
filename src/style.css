@@ -40,8 +40,23 @@ input[type=range] { width: 100%; accent-color: #ff8c42; cursor: pointer; }
 #tooltip .place { color: #dfe6f0; }
 #tooltip .meta { color: #7d8aa5; font-size: 11px; }
 
+#sidebar {
+  position: fixed; top: 16px; right: 16px; width: 250px; z-index: 10;
+  background: rgba(10,14,24,0.82); backdrop-filter: blur(8px);
+  border: 1px solid rgba(120,160,255,0.18); border-radius: 12px;
+  padding: 14px 16px; font-size: 12px;
+}
+#sigList { list-style: none; margin-top: 8px; }
+#sigList li {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 6px;
+  border-radius: 6px; cursor: pointer; line-height: 1.4;
+}
+#sigList li:hover { background: rgba(255,140,66,0.12); }
+#sigList .m { font-weight: 700; color: #ff8c42; flex-shrink: 0; width: 38px; }
+#sigList .p { color: #9fb0cc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 #detail {
-  position: fixed; top: 16px; right: 16px; width: 270px; z-index: 10; display: none;
+  position: fixed; top: 16px; right: 282px; width: 270px; z-index: 12; display: none;
   background: rgba(10,14,24,0.88); backdrop-filter: blur(8px); border: 1px solid rgba(255,140,66,0.4);
   border-radius: 12px; padding: 16px;
 }

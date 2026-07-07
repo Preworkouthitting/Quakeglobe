@@ -23,6 +23,7 @@ export const els = {
   live: $('live'),
   sound: $('sound'),
   toast: $('toast'),
+  sigList: $('sigList'),
   legendMag: $('legendMag'),
   legendDepth: $('legendDepth'),
   playBtn: $('playBtn'),
@@ -71,6 +72,28 @@ export function showDetail(quake) {
 }
 
 els.detailClose.addEventListener('click', () => { els.detail.style.display = 'none'; });
+
+function timeAgo(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  if (s < 86400) return Math.round(s / 3600) + 'h ago';
+  return Math.round(s / 86400) + 'd ago';
+}
+
+// Top-10 list; onSelect(quake) fires when a row is clicked
+export function renderSigList(quakes, onSelect) {
+  const top = [...quakes].sort((a, b) => b.mag - a.mag).slice(0, 10);
+  els.sigList.innerHTML = '';
+  for (const q of top) {
+    const li = document.createElement('li');
+    li.innerHTML =
+      '<span class="m">M' + q.mag.toFixed(1) + '</span>' +
+      '<span class="p">' + escapeHTML(q.feature.properties.place || 'Unknown') +
+      ' · ' + timeAgo(q.time) + '</span>';
+    li.addEventListener('click', () => onSelect(q));
+    els.sigList.appendChild(li);
+  }
+}
 
 let toastTimer = null;
 export function showToast(html) {

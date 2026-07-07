@@ -51,21 +51,63 @@ export function createScene(container) {
     renderer.setSize(innerWidth, innerHeight);
   });
 
+  // Smooth great-circle camera flight: slerp the view direction, ease the
+  // distance. controls.target stays at the origin, so only position moves.
+  let flight = null;
+  const _q = new THREE.Quaternion();
+  const _qe = new THREE.Quaternion();
+  const IDENTITY = new THREE.Quaternion();
+  function flyTo(normal, { duration = 1.6 } = {}) {
+    const from = camera.position.clone().normalize();
+    const d0 = camera.position.length();
+    flight = {
+      from,
+      rot: _q.setFromUnitVectors(from, normal.clone().normalize()).clone(),
+      d0,
+      d1: Math.min(Math.max(d0, 190), 320), // land at a readable distance
+      t: 0,
+      duration,
+      resumeAutoRotate: controls.autoRotate,
+    };
+    controls.autoRotate = false;
+  }
+  const easeInOut = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+  // user grabbing the globe cancels an in-progress flight
+  controls.addEventListener('start', () => {
+    if (flight) {
+      controls.autoRotate = flight.resumeAutoRotate;
+      flight = null;
+    }
+  });
+
   const tickers = [];
   const timer = new THREE.Timer(); // THREE.Clock is deprecated as of r185
   renderer.setAnimationLoop(() => {
     timer.update();
     const dt = timer.getDelta();
     const t = timer.getElapsed();
+    if (flight) {
+      flight.t += dt / flight.duration;
+      const e = easeInOut(Math.min(flight.t, 1));
+      _qe.slerpQuaternions(IDENTITY, flight.rot, e);
+      const dist = flight.d0 + (flight.d1 - flight.d0) * e;
+      camera.position.copy(flight.from).applyQuaternion(_qe).multiplyScalar(dist);
+      if (flight.t >= 1) {
+        controls.autoRotate = flight.resumeAutoRotate;
+        flight = null;
+      }
+    }
     controls.update();
     for (const fn of tickers) fn(t, dt);
     renderer.render(scene, camera);
   });
 
   return {
-    scene, camera, renderer, controls,
+    scene, camera, renderer, controls, flyTo,
     // register a per-frame callback(elapsed, delta)
     onTick(fn) { tickers.push(fn); },
+    get flying() { return flight !== null; },
   };
 }
 

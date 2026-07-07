@@ -46,6 +46,10 @@ function applyFeatures(features) {
   const extent = markers.timeExtent();
   if (extent) timeline.setWindow(extent[0], extent[1]);
   ui.updateStats(markers.visibleStats());
+  ui.renderSigList(markers.quakes, q => {
+    app.flyTo(q.normal);
+    ui.showDetail(q);
+  });
 }
 
 async function loadFeed(feed) {
