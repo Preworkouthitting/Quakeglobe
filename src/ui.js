@@ -24,6 +24,9 @@ export const els = {
   sound: $('sound'),
   toast: $('toast'),
   sigList: $('sigList'),
+  banner: $('banner'),
+  sheet: $('sheet'),
+  sheetToggle: $('sheetToggle'),
   legendMag: $('legendMag'),
   legendDepth: $('legendDepth'),
   playBtn: $('playBtn'),
@@ -72,6 +75,7 @@ export function showDetail(quake) {
 }
 
 els.detailClose.addEventListener('click', () => { els.detail.style.display = 'none'; });
+els.sheetToggle.addEventListener('click', () => els.sheet.classList.toggle('open'));
 
 function timeAgo(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);
@@ -93,6 +97,14 @@ export function renderSigList(quakes, onSelect) {
     li.addEventListener('click', () => onSelect(q));
     els.sigList.appendChild(li);
   }
+}
+
+export function showBanner(text) {
+  els.banner.textContent = text;
+  els.banner.classList.add('show');
+}
+export function hideBanner() {
+  els.banner.classList.remove('show');
 }
 
 let toastTimer = null;

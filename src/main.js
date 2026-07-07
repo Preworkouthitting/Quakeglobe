@@ -52,15 +52,20 @@ function applyFeatures(features) {
   });
 }
 
+let retryTimer = null;
 async function loadFeed(feed) {
   ui.setLoading(true);
+  clearTimeout(retryTimer);
   try {
-    const features = await fetchFeed(feed);
+    const features = await fetchFeed(feed); // retries with backoff internally
     applyFeatures(features);
     live.rememberIds(features);
+    ui.hideBanner();
   } catch (e) {
     console.error('Feed error:', e);
     ui.els.count.textContent = 'load failed';
+    ui.showBanner('USGS feed unreachable — retrying in 60 s');
+    retryTimer = setTimeout(() => loadFeed(ui.els.feed.value), 60_000);
   }
   ui.setLoading(false);
 }
@@ -162,4 +167,19 @@ loadFeed(ui.els.feed.value);
 if (import.meta.env.DEV) {
   // dev-only handle for browser-console verification
   window.__quake = { app, globe, markers, timeline, live, shockwaves, ping };
+
+  // dev-only FPS meter (stripped from prod builds)
+  const meter = document.createElement('div');
+  meter.style.cssText = 'position:fixed;bottom:4px;right:4px;z-index:40;font:11px monospace;color:#4ade80;background:rgba(5,7,13,0.7);padding:2px 6px;border-radius:4px;pointer-events:none';
+  document.body.appendChild(meter);
+  let frames = 0, last = performance.now();
+  app.onTick(() => {
+    frames++;
+    const now = performance.now();
+    if (now - last >= 500) {
+      meter.textContent = Math.round(frames * 1000 / (now - last)) + ' fps';
+      window.__quake.fps = frames * 1000 / (now - last);
+      frames = 0; last = now;
+    }
+  });
 }

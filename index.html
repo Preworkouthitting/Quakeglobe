@@ -10,6 +10,7 @@
 <div id="canvas-wrap"></div>
 <div id="loading">Loading earthquakes…</div>
 
+<div id="sheet">
 <div id="panel">
   <h1>🌍 Quake Globe</h1>
   <div class="sub">Live data · USGS Earthquake Hazards Program</div>
@@ -67,17 +68,21 @@
   </div>
 </div>
 
+<div id="sidebar">
+  <b class="legend-title">Significant quakes</b>
+  <ol id="sigList"></ol>
+</div>
+</div><!-- /sheet -->
+
 <div id="timeline">
   <button id="playBtn" title="Play / pause timeline">▶</button>
   <input type="range" id="scrub" min="0" max="1000" step="1" value="1000">
   <span id="timeLabel">now</span>
 </div>
 
-<div id="sidebar">
-  <b class="legend-title">Significant quakes</b>
-  <ol id="sigList"></ol>
-</div>
+<button id="sheetToggle" title="Show controls">☰</button>
 
+<div id="banner"></div>
 <div id="toast"></div>
 <div id="tooltip"></div>
 <div id="detail"><span class="close" id="detailClose">×</span><div id="detailBody"></div></div>

@@ -28,5 +28,7 @@ function snapshotPlugin() {
 }
 
 export default defineConfig({
+  // relative base so the build works at any GitHub Pages path
+  base: './',
   plugins: [snapshotPlugin()],
 });
