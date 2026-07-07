@@ -36,6 +36,12 @@
   <div class="ctrl">
     <label class="toggle"><input type="checkbox" id="plates" checked> Plate boundaries</label>
   </div>
+  <div class="ctrl">
+    <label class="toggle"><input type="checkbox" id="live" checked> Live updates (5 min)</label>
+  </div>
+  <div class="ctrl">
+    <label class="toggle"><input type="checkbox" id="sound"> Sound on new quakes</label>
+  </div>
   <div id="stats">
     Showing <b id="count">0</b> quakes<br>
     Strongest: <b id="maxMag">–</b><br>
@@ -67,6 +73,7 @@
   <span id="timeLabel">now</span>
 </div>
 
+<div id="toast"></div>
 <div id="tooltip"></div>
 <div id="detail"><span class="close" id="detailClose">×</span><div id="detailBody"></div></div>
 

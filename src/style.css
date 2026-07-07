@@ -68,5 +68,15 @@ input[type=range] { width: 100%; accent-color: #ff8c42; cursor: pointer; }
 #timeline input[type=range] { flex: 1; }
 #timeLabel { font-size: 11px; color: #9fb0cc; white-space: nowrap; min-width: 118px; text-align: right; }
 
+#toast {
+  position: fixed; top: 16px; left: 50%; transform: translate(-50%, -60px);
+  z-index: 25; font-size: 13px; color: #dfe6f0; pointer-events: none;
+  background: rgba(10,14,24,0.92); backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,140,66,0.5); border-radius: 10px;
+  padding: 10px 18px; opacity: 0; transition: opacity 0.35s, transform 0.35s;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast b { color: #ff8c42; }
+
 #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   z-index: 30; font-size: 13px; color: #9fb0cc; background: rgba(5,7,13,0.6); }

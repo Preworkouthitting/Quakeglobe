@@ -20,6 +20,9 @@ export const els = {
   detailClose: $('detailClose'),
   depthMode: $('depthMode'),
   plates: $('plates'),
+  live: $('live'),
+  sound: $('sound'),
+  toast: $('toast'),
   legendMag: $('legendMag'),
   legendDepth: $('legendDepth'),
   playBtn: $('playBtn'),
@@ -68,3 +71,11 @@ export function showDetail(quake) {
 }
 
 els.detailClose.addEventListener('click', () => { els.detail.style.display = 'none'; });
+
+let toastTimer = null;
+export function showToast(html) {
+  els.toast.innerHTML = html;
+  els.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), 5000);
+}
