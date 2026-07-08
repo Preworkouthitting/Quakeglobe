@@ -121,11 +121,20 @@ export function createScene(container) {
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
+  // Idle rendering: tickers run every rAF (cheap), but the actual render is
+  // skipped down to ~30 fps when nothing is animating. Any activity source
+  // returning true restores full rate on the very next frame. When the tab
+  // is hidden the loop stops completely.
   const tickers = [];
+  const activitySources = [];
+  // dev meter counts real renders; idleInterval ≈ 30 fps floor (vsync margin)
+  const frameStats = { renders: 0, idleInterval: 1000 / 30 - 2 };
+  let lastRender = 0;
+
   const timer = new THREE.Timer(); // THREE.Clock is deprecated as of r185
-  renderer.setAnimationLoop(() => {
+  function frame() {
     timer.update();
-    const dt = timer.getDelta();
+    const dt = Math.min(timer.getDelta(), 0.1); // clamp resume-from-hidden spikes
     const t = timer.getElapsed();
     if (flight) {
       flight.t += dt / flight.duration;
@@ -139,17 +148,32 @@ export function createScene(container) {
         controls.dispatchEvent({ type: 'end' }); // camera landed — listeners sync
       }
     }
-    controls.update();
+    const cameraMoved = controls.update(); // true while dragging/damping/auto-rotating
     for (const fn of tickers) fn(t, dt);
-    composer.render();
+
+    let active = cameraMoved || flight !== null;
+    for (let i = 0; !active && i < activitySources.length; i++) active = !!activitySources[i]();
+    const now = performance.now();
+    if (active || now - lastRender >= frameStats.idleInterval) {
+      composer.render();
+      frameStats.renders++;
+      lastRender = now;
+    }
+  }
+  renderer.setAnimationLoop(frame);
+
+  document.addEventListener('visibilitychange', () => {
+    renderer.setAnimationLoop(document.hidden ? null : frame);
   });
 
   return {
-    scene, camera, renderer, controls, composer, bloom, sun, fill, flyTo,
+    scene, camera, renderer, controls, composer, bloom, sun, fill, flyTo, frameStats,
     // render one frame through the full post chain (for captures)
     render() { composer.render(); },
     // register a per-frame callback(elapsed, delta)
     onTick(fn) { tickers.push(fn); },
+    // register an "is something animating?" predicate for the idle limiter
+    addActivity(fn) { activitySources.push(fn); },
     get flying() { return flight !== null; },
   };
 }

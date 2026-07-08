@@ -26,6 +26,13 @@ const shockwaves = new Shockwaves(app.scene);
 app.onTick((t, dt) => shockwaves.update(t, dt));
 const ping = new Ping();
 
+// Things that force full-rate rendering while they animate (idle limiter)
+app.addActivity(() => timeline.playing);
+app.addActivity(() => markers.flashing.size > 0);
+app.addActivity(() => markers.ringGroup.visible && markers.pulseRings.some(r => r.visible));
+app.addActivity(() => shockwaves.active.length > 0);
+app.addActivity(() => performance.now() - lastPointerMove < 120);
+
 // ---------- Timeline ----------
 const timeline = new Timeline({
   onTime(cutoff, { flash, atEnd }) {
@@ -196,6 +203,7 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let pointerPix = { x: 0, y: 0 };
 let hoverDirty = false;
+let lastPointerMove = 0;
 let downAt = { x: 0, y: 0 };
 
 function pickAtPointer() {
@@ -206,8 +214,10 @@ function pickAtPointer() {
 app.renderer.domElement.addEventListener('pointermove', e => {
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
-  pointerPix = { x: e.clientX, y: e.clientY };
+  pointerPix.x = e.clientX;
+  pointerPix.y = e.clientY;
   hoverDirty = true;
+  lastPointerMove = performance.now();
 });
 
 // Raycast at most once per frame, not per pointermove event
@@ -324,14 +334,15 @@ if (import.meta.env.DEV) {
   const meter = document.createElement('div');
   meter.style.cssText = 'position:fixed;bottom:4px;right:4px;z-index:40;font:11px monospace;color:#4ade80;background:rgba(5,7,13,0.7);padding:2px 6px;border-radius:4px;pointer-events:none';
   document.body.appendChild(meter);
-  let frames = 0, last = performance.now();
+  let lastRenders = 0, last = performance.now();
   app.onTick(() => {
-    frames++;
     const now = performance.now();
     if (now - last >= 500) {
-      meter.textContent = Math.round(frames * 1000 / (now - last)) + ' fps';
-      window.__quake.fps = frames * 1000 / (now - last);
-      frames = 0; last = now;
+      const fps = (app.frameStats.renders - lastRenders) * 1000 / (now - last);
+      meter.textContent = Math.round(fps) + ' fps';
+      window.__quake.fps = fps;
+      lastRenders = app.frameStats.renders;
+      last = now;
     }
   });
 }
