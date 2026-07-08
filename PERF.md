@@ -35,3 +35,45 @@ Known hot spots identified for the pass:
 7. `normal.clone()` allocations in `writeMatrix` (runs 10.6k× per visibility
    pass, every frame during timeline playback); per-event object literals in
    pointermove.
+
+## After (commit 9148754) — before/after
+
+Same environment and methodology as the baseline; `all_month` (~10.6k
+events) loaded, dpr 1.
+
+| Metric | Baseline | After | Change |
+| --- | --- | --- | --- |
+| CPU frame submit | 0.40 ms | 0.04 ms | 10× |
+| Raw pick (60 rays vs 10.6k instances) | 0.78 ms | 0.09–0.17 ms | ~5–9× |
+| all_month load main-thread long tasks | one 67 ms | **none** | worker |
+| Draw calls, scene | 47 | **6** | 8× |
+| Draw calls, with post chain | 61 | 20 | bloom's ~14 internal passes are fixed cost |
+| Allocation rate, rotate idle (12 s) | 9,950 KB/s, 35 GC scavenges | 1,449 KB/s, 6 | ~7× less churn |
+| Allocation rate, timeline playback (12 s) | 9,804 KB/s, 23 GC | 1,521 KB/s, 19 GC | ~6× |
+| Per-call allocation: `composer.render` / `controls.update` / `markers.update` | — | **0 bytes** | measured over 200–500 calls |
+| JS heap after all_month (post-GC floor) | ~75 MB | ~77 MB (JPEG) / ~82 MB (KTX2) | ~flat; +5 MB is transcoded KTX2 block data, offset by 6× less GPU texture memory |
+| Texture payload | 2,546 KB (unpkg CDN) | **420 KB** KTX2 / 586 KB JPEG fallback, self-hosted | 6× smaller, GPU-compressed |
+| Lighthouse performance (prod preview) | 75 (TBT 1,060 ms) | **84** (TBT 487 ms) | FCP/LCP ~2.1 s unchanged — dominated by the three.js bundle parse; code-splitting was out of scope |
+
+New behavior (no visual change when active):
+
+- Tab hidden → render loop fully stopped. Idle (no input/tween/playback/
+  visible pulse ring/shockwave, auto-rotate off) → ~30 fps floor; any
+  interaction restores full rate next frame.
+- dpr capped at 2, degraded to 1.5 at dpr ≥ 3 or > 2560 px canvases.
+- Feed pipeline: worker fetch/parse/math → transferable SoA typed arrays
+  feeding the InstancedMesh directly.
+- Picking: typed-array bounding-sphere broad phase + three-mesh-bvh
+  narrow phase (verified 150/150 identical to stock raycast, both modes).
+- Rings/shockwaves/stars each render as ONE instanced/merged draw with
+  animation in the vertex shader.
+
+Regression sweep after the pass: picking, tooltips, detail card, scrubber
+seek + playback flashes, depth mode round-trip, live diff (toast +
+shockwave), deep-link writes, historical form defaults, stats charts —
+all pass. Prod bundle contains no FPS meter, no `__quake` dev handle, no
+encoder code (verified by grep).
+
+Repro notes: FPS meter (dev only) shows real post-limiter render rate;
+`scripts/encode-ktx2.js` regenerates the KTX2 textures from the dev page
+console. Lighthouse runs against `vite preview` on the built dist.
