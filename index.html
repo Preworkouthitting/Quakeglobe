@@ -22,12 +22,43 @@
       <option value="2.5_week">Past 7 days (M2.5+)</option>
       <option value="4.5_month">Past 30 days (M4.5+)</option>
       <option value="all_month">Past 30 days (all)</option>
+      <option value="__hist" hidden>Historical query</option>
     </select>
   </div>
   <div class="ctrl">
     <label class="row"><span>Min magnitude</span><span id="magVal">0.0</span></label>
     <input type="range" id="minMag" min="0" max="7" step="0.1" value="0">
   </div>
+  <details class="ctrl" id="histBox">
+    <summary>Historical query</summary>
+    <div class="hist-body">
+      <label for="histStart">From</label>
+      <input type="date" id="histStart" value="2011-03-01">
+      <label for="histEnd">To</label>
+      <input type="date" id="histEnd" value="2011-04-01">
+      <label for="histMag">Min magnitude</label>
+      <select id="histMag">
+        <option value="4" selected>M4+</option>
+        <option value="4.5">M4.5+</option>
+        <option value="5">M5+</option>
+        <option value="6">M6+</option>
+        <option value="7">M7+</option>
+      </select>
+      <label for="histRegion">Region</label>
+      <select id="histRegion">
+        <option value="" selected>Worldwide</option>
+        <option value="japan">Japan</option>
+        <option value="indonesia">Indonesia</option>
+        <option value="chile">Chile</option>
+        <option value="california">California</option>
+        <option value="alaska">Alaska</option>
+        <option value="mediterranean">Mediterranean</option>
+        <option value="newzealand">New Zealand</option>
+      </select>
+      <button id="histGo">Search archive</button>
+      <div id="histNote"></div>
+    </div>
+  </details>
   <div class="ctrl">
     <label class="toggle"><input type="checkbox" id="spin" checked> Auto-rotate</label>
   </div>

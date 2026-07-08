@@ -20,6 +20,27 @@ select {
 }
 input[type=range] { width: 100%; accent-color: #ff8c42; cursor: pointer; }
 .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+
+details.ctrl summary {
+  font-size: 11px; color: #9fb0cc; text-transform: uppercase; letter-spacing: 0.6px;
+  cursor: pointer; user-select: none;
+}
+details.ctrl summary:hover { color: #dfe6f0; }
+.hist-body { margin-top: 8px; display: grid; gap: 4px; }
+.hist-body label { font-size: 10px !important; margin-bottom: 0 !important; }
+.hist-body input[type=date] {
+  width: 100%; background: #131a2b; color: #dfe6f0; border: 1px solid #2a3550;
+  border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: inherit;
+  color-scheme: dark;
+}
+#histGo {
+  margin-top: 6px; padding: 7px 0; font-size: 12px; cursor: pointer;
+  background: rgba(255,140,66,0.15); color: #ff8c42;
+  border: 1px solid rgba(255,140,66,0.5); border-radius: 6px;
+}
+#histGo:hover { background: rgba(255,140,66,0.25); }
+#histGo:disabled { opacity: 0.5; cursor: default; }
+#histNote { font-size: 11px; color: #7d8aa5; min-height: 14px; }
 .toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9fb0cc; cursor: pointer; text-transform: none !important; letter-spacing: 0 !important; }
 #stats { border-top: 1px solid rgba(120,160,255,0.15); padding-top: 10px; font-size: 12px; line-height: 1.7; color: #9fb0cc; }
 #stats b { color: #dfe6f0; }

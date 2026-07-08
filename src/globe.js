@@ -61,7 +61,7 @@ const GLOBE_FRAG = /* glsl */ `
     // tight lobe — at planetary scale the glint is a small bright spot,
     // with a faint wide sheen underneath
     float facing = max(dot(n, h), 0.0);
-    float spec = pow(facing, 320.0) * 0.85 + pow(facing, 24.0) * 0.08;
+    float spec = pow(facing, 320.0) * 0.55 + pow(facing, 24.0) * 0.06;
     color += vec3(1.0, 0.93, 0.82) * spec * water * sunUp;
 
     gl_FragColor = vec4(color, 1.0);

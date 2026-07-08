@@ -3,7 +3,7 @@ import { createScene } from './scene.js';
 import { createGlobe } from './globe.js';
 import { QuakeMarkers } from './markers.js';
 import { createPlateBoundaries } from './plates.js';
-import { fetchFeed } from './data.js';
+import { fetchFeed, queryEvents, QUERY_LIMIT } from './data.js';
 import { LiveUpdater, Shockwaves, Ping } from './live.js';
 import { magColor } from './markers.js';
 import { Timeline } from './timeline.js';
@@ -53,10 +53,25 @@ function applyFeatures(features) {
   });
 }
 
+// Circular regions for the historical archive (lat, lon, radius km)
+const REGIONS = {
+  japan: { lat: 38, lon: 142, km: 1500 },
+  indonesia: { lat: -2, lon: 120, km: 2000 },
+  chile: { lat: -30, lon: -71, km: 1800 },
+  california: { lat: 36.5, lon: -119.5, km: 700 },
+  alaska: { lat: 61, lon: -150, km: 1500 },
+  mediterranean: { lat: 38, lon: 15, km: 1600 },
+  newzealand: { lat: -41, lon: 174, km: 1200 },
+};
+
+let historical = null; // active archive query params, or null for live feeds
 let retryTimer = null;
+
 async function loadFeed(feed) {
   ui.setLoading(true);
   clearTimeout(retryTimer);
+  historical = null;
+  ui.els.histNote.textContent = '';
   try {
     const features = await fetchFeed(feed); // retries with backoff internally
     applyFeatures(features);
@@ -71,11 +86,45 @@ async function loadFeed(feed) {
   ui.setLoading(false);
 }
 
+async function loadHistorical(params) {
+  ui.setLoading(true);
+  clearTimeout(retryTimer);
+  ui.els.histGo.disabled = true;
+  try {
+    const features = await queryEvents(params);
+    historical = params;
+    ui.els.feed.value = '__hist'; // canned-feed select shows "Historical query"
+    applyFeatures(features);
+    ui.hideBanner();
+    ui.els.histNote.textContent = features.length >= QUERY_LIMIT
+      ? `Showing the ${QUERY_LIMIT} largest events — narrow the range for all`
+      : `${features.length} events loaded`;
+  } catch (e) {
+    console.error('Archive query error:', e);
+    ui.els.histNote.textContent = 'Query failed — check the date range';
+  }
+  ui.els.histGo.disabled = false;
+  ui.setLoading(false);
+}
+
+ui.els.histGo.addEventListener('click', () => {
+  const start = ui.els.histStart.value, end = ui.els.histEnd.value;
+  if (!start || !end || start >= end) {
+    ui.els.histNote.textContent = 'Pick a valid date range';
+    return;
+  }
+  loadHistorical({
+    start, end,
+    minMag: parseFloat(ui.els.histMag.value),
+    region: REGIONS[ui.els.histRegion.value] || null,
+  });
+});
+
 // ---------- Live updates ----------
 const live = new LiveUpdater({
   getFeed: () => ui.els.feed.value,
-  // don't yank the data out from under an active playback/scrub session
-  canApply: () => !timeline.playing && timeline.cutoff >= timeline.end,
+  // don't refresh over historical results or an active playback/scrub session
+  canApply: () => !historical && !timeline.playing && timeline.cutoff >= timeline.end,
   onUpdate(features, fresh) {
     applyFeatures(features);
     if (!fresh.length) return;

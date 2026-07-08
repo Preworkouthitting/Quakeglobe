@@ -25,6 +25,13 @@ export const els = {
   toast: $('toast'),
   sigList: $('sigList'),
   banner: $('banner'),
+  histBox: $('histBox'),
+  histStart: $('histStart'),
+  histEnd: $('histEnd'),
+  histMag: $('histMag'),
+  histRegion: $('histRegion'),
+  histGo: $('histGo'),
+  histNote: $('histNote'),
   sheet: $('sheet'),
   sheetToggle: $('sheetToggle'),
   legendMag: $('legendMag'),
@@ -81,7 +88,8 @@ function timeAgo(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);
   if (s < 3600) return Math.round(s / 60) + 'm ago';
   if (s < 86400) return Math.round(s / 3600) + 'h ago';
-  return Math.round(s / 86400) + 'd ago';
+  if (s < 30 * 86400) return Math.round(s / 86400) + 'd ago';
+  return new Date(ms).toLocaleDateString(); // archive events: show the date
 }
 
 // Top-10 list; onSelect(quake) fires when a row is clicked
