@@ -1,9 +1,12 @@
 import * as THREE from 'three';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { R, latLonToVec3 } from './scene.js';
 
-const DAY_URL = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
-const NIGHT_URL = 'https://unpkg.com/three-globe/example/img/earth-night.jpg';
-const WATER_URL = 'https://unpkg.com/three-globe/example/img/earth-water.png';
+// Self-hosted, 2048px max. KTX2 (Basis ETC1S — stays compressed on the GPU)
+// with plain JPEG as fallback; scripts/encode-ktx2.js regenerates the .ktx2
+// files. The .ktx2 variants are pre-flipped (KTX2 can't flipY at load time).
+const TEX_BASE = import.meta.env.BASE_URL + 'textures/';
+const BASIS_PATH = import.meta.env.BASE_URL + 'basis/';
 
 // Subsolar point from UTC time: solar declination (±23.44° over the year)
 // and the longitude where it is currently solar noon. Good to ~1°, which is
@@ -93,7 +96,7 @@ const ATMO_FRAG = /* glsl */ `
   }
 `;
 
-function loadTexture(url, srgb) {
+function loadJPEG(url, srgb) {
   return new Promise((resolve, reject) => {
     new THREE.TextureLoader().load(url, tex => {
       if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
@@ -103,7 +106,36 @@ function loadTexture(url, srgb) {
   });
 }
 
-export function createGlobe() {
+// [day, night, water] — KTX2 first, JPEG fallback, null if both tiers fail
+async function loadTextureSet(renderer) {
+  const ktx2 = new KTX2Loader().setTranscoderPath(BASIS_PATH).detectSupport(renderer);
+  const loadK = url => new Promise((resolve, reject) => {
+    ktx2.load(url, tex => { tex.anisotropy = 8; resolve(tex); }, undefined, reject);
+  });
+  try {
+    return await Promise.all([
+      loadK(TEX_BASE + 'earth-day.ktx2'),
+      loadK(TEX_BASE + 'earth-night.ktx2'),
+      loadK(TEX_BASE + 'earth-water.ktx2'),
+    ]);
+  } catch (e) {
+    console.warn('KTX2 textures unavailable, falling back to JPEG:', e);
+  } finally {
+    ktx2.dispose();
+  }
+  try {
+    return await Promise.all([
+      loadJPEG(TEX_BASE + 'earth-day.jpg', true),
+      loadJPEG(TEX_BASE + 'earth-night.jpg', true),
+      loadJPEG(TEX_BASE + 'earth-water.jpg', false),
+    ]);
+  } catch (e) {
+    console.warn('JPEG textures unavailable, keeping plain globe:', e);
+    return null;
+  }
+}
+
+export function createGlobe(renderer) {
   const group = new THREE.Group();
 
   // Phong fallback: shown until textures arrive, kept if the CDN is down
@@ -116,24 +148,14 @@ export function createGlobe() {
   let surfaceMaterial = material; // whatever depth-mode should restore to
   let dayNightMaterial = null;
 
-  Promise.allSettled([
-    loadTexture(DAY_URL, true),
-    loadTexture(NIGHT_URL, true),
-    loadTexture(WATER_URL, false),
-  ]).then(([day, night, water]) => {
-    if (day.status !== 'fulfilled') return; // keep plain dark-blue fallback
-    if (night.status !== 'fulfilled' || water.status !== 'fulfilled') {
-      // day texture alone: old behavior
-      material.map = day.value;
-      material.color.set(0xffffff);
-      material.needsUpdate = true;
-      return;
-    }
+  loadTextureSet(renderer).then(textures => {
+    if (!textures) return; // keep plain dark-blue fallback
+    const [day, night, water] = textures;
     dayNightMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        dayMap: { value: day.value },
-        nightMap: { value: night.value },
-        waterMap: { value: water.value },
+        dayMap: { value: day },
+        nightMap: { value: night },
+        waterMap: { value: water },
         sunDir: sunUniform,
       },
       vertexShader: GLOBE_VERT,

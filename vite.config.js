@@ -14,12 +14,16 @@ function snapshotPlugin() {
         let body = '';
         req.on('data', c => { body += c; });
         req.on('end', () => {
-          const name = (new URL(req.url, 'http://x').searchParams.get('name') || 'snap')
-            .replace(/[^a-z0-9_-]/gi, '');
-          const b64 = body.replace(/^data:image\/\w+;base64,/, '');
-          const dir = path.join(server.config.root, 'snapshots');
+          const q = new URL(req.url, 'http://x').searchParams;
+          const name = (q.get('name') || 'snap').replace(/[^a-z0-9_-]/gi, '');
+          const ext = (q.get('ext') || 'jpg').replace(/[^a-z0-9]/gi, '');
+          // dir=textures writes into public/textures (dev asset pipeline)
+          const dir = q.get('dir') === 'textures'
+            ? path.join(server.config.root, 'public', 'textures')
+            : path.join(server.config.root, 'snapshots');
+          const b64 = body.replace(/^data:[\w/+.-]+;base64,/, '');
           fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(path.join(dir, name + '.jpg'), Buffer.from(b64, 'base64'));
+          fs.writeFileSync(path.join(dir, name + '.' + ext), Buffer.from(b64, 'base64'));
           res.end('ok');
         });
       });

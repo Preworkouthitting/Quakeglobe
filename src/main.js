@@ -12,7 +12,7 @@ import { renderCharts } from './charts.js';
 import * as ui from './ui.js';
 
 const app = createScene(document.getElementById('canvas-wrap'));
-const globe = createGlobe();
+const globe = createGlobe(app.renderer);
 app.scene.add(globe.group);
 
 const markers = new QuakeMarkers(app.scene);

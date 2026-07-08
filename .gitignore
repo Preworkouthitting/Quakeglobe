@@ -4,3 +4,4 @@ dist/
 *.local
 snapshots/
 lh-*.json
+scratch-tex/
