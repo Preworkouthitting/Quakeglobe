@@ -160,6 +160,17 @@ async function loadHistorical(params) {
   ui.setLoading(false);
 }
 
+// Neutral archive-form defaults: the past year of M6+, worldwide.
+// (A deep-linked query overwrites these during boot.)
+{
+  const iso = d => d.toISOString().slice(0, 10);
+  const today = new Date();
+  const yearAgo = new Date(today);
+  yearAgo.setFullYear(today.getFullYear() - 1);
+  ui.els.histEnd.value = iso(today);
+  ui.els.histStart.value = iso(yearAgo);
+}
+
 ui.els.histGo.addEventListener('click', () => {
   const start = ui.els.histStart.value, end = ui.els.histEnd.value;
   if (!start || !end || start >= end) {
