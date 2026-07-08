@@ -66,8 +66,21 @@ export function hideTooltip() {
   els.tooltip.style.display = 'none';
 }
 
+// Feed data is untrusted input: escapeHTML stops attribute breakout, but an
+// href also needs a scheme/host check or javascript: URLs would execute.
+function safeEventUrl(u) {
+  try {
+    const url = new URL(u);
+    if (url.protocol === 'https:' && (url.hostname === 'usgs.gov' || url.hostname.endsWith('.usgs.gov'))) {
+      return url.href;
+    }
+  } catch { /* not a URL */ }
+  return null;
+}
+
 export function showDetail(quake) {
   const p = quake.feature.properties;
+  const url = safeEventUrl(p.url);
   els.detailBody.innerHTML =
     '<div class="mag">M' + quake.mag.toFixed(1) + '</div>' +
     '<div class="place">' + escapeHTML(p.place || 'Unknown location') + '</div>' +
@@ -78,7 +91,7 @@ export function showDetail(quake) {
       (p.tsunami ? '⚠️ Tsunami flag raised<br>' : '') +
       'Felt reports: ' + (p.felt || 0) +
     '</div>' +
-    '<a href="' + escapeHTML(p.url) + '" target="_blank" rel="noopener">View on USGS →</a>';
+    (url ? '<a href="' + escapeHTML(url) + '" target="_blank" rel="noopener">View on USGS →</a>' : '');
   els.detail.style.display = 'block';
 }
 
