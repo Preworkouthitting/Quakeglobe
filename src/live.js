@@ -53,7 +53,10 @@ export class Shockwaves {
   spawn(normal, color, mag = 4) {
     const mesh = new THREE.Mesh(
       this.geo,
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color).multiplyScalar(2.2), // HDR → strong bloom
+        transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+      })
     );
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
     mesh.position.copy(normal).multiplyScalar(R + 0.4);

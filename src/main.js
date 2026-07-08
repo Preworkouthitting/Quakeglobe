@@ -15,6 +15,7 @@ app.scene.add(globe.group);
 
 const markers = new QuakeMarkers(app.scene);
 app.onTick(t => markers.update(t));
+app.onTick((t, dt) => globe.updateSun(dt, app.sun, app.fill));
 
 const plates = createPlateBoundaries();
 app.scene.add(plates);

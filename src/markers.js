@@ -3,6 +3,9 @@ import { R, latLonToVec3 } from './scene.js';
 
 const CAPACITY = 15000; // all_month is ~10k events; leave headroom
 const FLASH_MS = 1400;  // how long a quake glows after "occurring" in playback
+// Material-level HDR multiplier: pushes marker colors past BLOOM_THRESHOLD
+// so spikes/points glow while the globe beneath them stays bloom-free
+const GLOW = 1.9;
 
 export function magColor(m) {
   if (m >= 6) return 0xef4444;
@@ -41,6 +44,7 @@ export class QuakeMarkers {
     const geo = new THREE.ConeGeometry(1, 1, 6);
     geo.translate(0, 0.5, 0);
     this.material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.92 });
+    this.material.color.setScalar(GLOW); // diffuse = color × instanceColor
     this.mesh = new THREE.InstancedMesh(geo, this.material, CAPACITY);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0;
@@ -49,6 +53,7 @@ export class QuakeMarkers {
     // Depth mode: spheres below the surface at (exaggerated) true depth
     const depthGeo = new THREE.SphereGeometry(1, 8, 6);
     this.depthMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85 });
+    this.depthMaterial.color.setScalar(GLOW * 0.8); // deep violets need less push
     this.depthMesh = new THREE.InstancedMesh(depthGeo, this.depthMaterial, CAPACITY);
     this.depthMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.depthMesh.count = 0;
@@ -179,7 +184,10 @@ export class QuakeMarkers {
   addPulseRing(q) {
     const ring = new THREE.Mesh(
       this.ringGeo,
-      new THREE.MeshBasicMaterial({ color: q.color, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(q.color).multiplyScalar(1.7), // HDR → blooms
+        transparent: true, opacity: 0.8, side: THREE.DoubleSide,
+      })
     );
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), q.normal);
     ring.position.copy(q.normal).multiplyScalar(R + 0.3);

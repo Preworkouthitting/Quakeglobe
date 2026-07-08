@@ -5,9 +5,16 @@ magnitude-scaled spikes on a Three.js globe — with a time scrubber, a
 true-depth view that reveals subduction zones, tectonic plate boundaries,
 and live updates with shockwave animations.
 
-![Quake Globe — Pacific rim with plate boundaries](docs/globe.jpg)
+![Quake Globe — night side with city lights and glowing quakes](docs/globe.jpg)
 
 ## Features
+
+- **Cinematic rendering** — HDR bloom on quake markers, a real day/night
+  terminator computed from the current UTC sun position (city lights at
+  night, sun glint on daytime oceans), fresnel rim atmosphere, and ACES
+  filmic tone mapping
+
+  ![Day side — ocean sun glint near the subsolar point](docs/day-glint.jpg)
 
 - **Live USGS feeds** — past hour to past 30 days (up to ~10k events),
   magnitude filter, hover tooltips, click-for-detail cards
@@ -72,8 +79,16 @@ scripts/
 
 Rendering notes:
 
-- All ~10k quakes live in a single `InstancedMesh` (5 draw calls total
-  for the whole scene); comfortably 60+ fps with `all_month` loaded.
+- All ~10k quakes live in a single `InstancedMesh` (a handful of draw
+  calls for the whole scene); comfortably 60+ fps with `all_month` loaded
+  including the post-processing chain.
+- Bloom is "selective" without a second render pass: the scene renders
+  into a half-float HDR target and only marker/ring colors are boosted
+  past the bloom threshold, so the earth never glows.
+- The day/night globe is one custom shader: day and night textures blend
+  across the terminator from the live subsolar point, with a water-mask
+  specular glint. Night texture: NASA Earth at Night via three-globe
+  example assets.
 - Hover picking raycasts the instanced mesh at most once per frame;
   `instanceId` indexes straight into the quake records.
 - Marker visibility (magnitude filter × timeline cutoff) is applied by
