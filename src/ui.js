@@ -93,11 +93,10 @@ function timeAgo(ms) {
   return new Date(ms).toLocaleDateString(); // archive events: show the date
 }
 
-// Top-10 list; onSelect(quake) fires when a row is clicked
+// quakes: already the top-N by magnitude; onSelect(quake) fires on click
 export function renderSigList(quakes, onSelect) {
-  const top = [...quakes].sort((a, b) => b.mag - a.mag).slice(0, 10);
   els.sigList.innerHTML = '';
-  for (const q of top) {
+  for (const q of quakes) {
     const li = document.createElement('li');
     li.innerHTML =
       '<span class="m">M' + q.mag.toFixed(1) + '</span>' +

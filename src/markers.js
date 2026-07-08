@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { R, latLonToVec3 } from './scene.js';
+import { R } from './scene.js';
 
 const CAPACITY = 15000; // all_month is ~10k events; leave headroom
 const FLASH_MS = 1400;  // how long a quake glows after "occurring" in playback
@@ -7,6 +7,8 @@ const FLASH_MS = 1400;  // how long a quake glows after "occurring" in playback
 // so spikes/points glow while the globe beneath them stays bloom-free
 const GLOW = 1.9;
 
+// Hex ramps kept for the legend/charts; per-instance linear colors are
+// precomputed in the feed worker.
 export function magColor(m) {
   if (m >= 6) return 0xef4444;
   if (m >= 4.5) return 0xfb923c;
@@ -14,7 +16,6 @@ export function magColor(m) {
   return 0x4ade80;
 }
 
-// Depth of the deepest quakes on Earth is ~700 km; ramp shallow→deep
 const DEPTH_STOPS = [0xff8c42, 0xfacc15, 0x4ade80, 0x38bdf8, 0x8b5cf6].map(c => new THREE.Color(c));
 export function depthColor(km, target = new THREE.Color()) {
   const t = Math.min(Math.max(km, 0) / 660, 1) * (DEPTH_STOPS.length - 1);
@@ -30,13 +31,16 @@ const DEPTH_EXAGGERATION = 3;
 const _mat4 = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
+const _pos = new THREE.Vector3();
+const _normal = new THREE.Vector3();
 const _color = new THREE.Color();
 const WHITE = new THREE.Color(0xffffff);
 const UP = new THREE.Vector3(0, 1, 0);
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
-// All quake spikes live in a single InstancedMesh; per-quake records keep the
-// feature data and the instanceId ↔ quake mapping for raycast picking.
+// All quake data lives in typed arrays straight from the feed worker (SoA).
+// Instance i of the InstancedMesh IS quake i — picking, filtering and the
+// timeline all work on indices; view(i) builds a UI-shaped object on demand.
 // Visibility = mag ≥ minMag AND event time ≤ timeCutoff (timeline scrubber).
 export class QuakeMarkers {
   constructor(parent) {
@@ -65,66 +69,77 @@ export class QuakeMarkers {
     parent.add(this.ringGroup);
     this.ringGeo = new THREE.RingGeometry(1, 1.35, 32);
 
-    this.quakes = [];      // per-instance records, index === instanceId
+    this.buf = null;          // SoA arrays from the worker
+    this.shown = new Uint8Array(0);
     this.pulseRings = [];
     this.minMag = 0;
     this.timeCutoff = Infinity;
-    this.flashing = new Set(); // instanceIds currently flashing
+    this.flashing = new Set(); // instance ids currently flashing
     this.hoveredId = null;
   }
 
-  setData(features) {
+  get count() {
+    return this.buf ? this.buf.count : 0;
+  }
+
+  setBuffer(buf) {
     this.clearRings();
     this.hoveredId = null;
     this.flashing.clear();
-    const now = Date.now();
+    this.buf = buf;
+    this.shown = new Uint8Array(buf.count);
 
-    this.quakes = features.slice(0, CAPACITY).map(f => {
-      const [lon, lat, depth] = f.geometry.coordinates;
-      const mag = Math.max(f.properties.mag, 0.1);
-      const normal = latLonToVec3(lat, lon, 1);
-      return {
-        feature: f,
-        time: f.properties.time,
-        mag, lat, lon, depth: depth || 0,
-        normal,
-        h: Math.max(1.5, mag * mag * 0.55),
-        w: Math.max(0.4, mag * 0.28),
-        color: magColor(mag),
-        recent: now - f.properties.time < 2 * 3600 * 1000,
-        shown: true,
-        flashUntil: 0,
-      };
-    });
+    this.mesh.count = buf.count;
+    this.depthMesh.count = buf.count;
+    // mutable copies — hover/flash restore from the pristine buf arrays
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(buf.surfColors.slice(), 3);
+    this.depthMesh.instanceColor = new THREE.InstancedBufferAttribute(buf.depthColors.slice(), 3);
 
-    this.mesh.count = this.quakes.length;
-    this.depthMesh.count = this.quakes.length;
-    this.quakes.forEach((q, i) => {
-      this.mesh.setColorAt(i, _color.set(q.color));
-      this.depthMesh.setColorAt(i, depthColor(q.depth, _color));
-      if (q.recent) this.addPulseRing(q);
-    });
+    for (let i = 0; i < buf.count; i++) if (buf.recent[i]) this.addPulseRing(i);
+
     this.timeCutoff = Infinity;
     this.updateVisibility();
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-    if (this.depthMesh.instanceColor) this.depthMesh.instanceColor.needsUpdate = true;
+  }
+
+  // UI-shaped object for a single quake (only built for picks/sidebar/toasts)
+  view(i) {
+    const b = this.buf, p = b.props[i];
+    return {
+      index: i,
+      mag: b.mags[i],
+      depth: b.depths[i],
+      lat: b.lats[i],
+      lon: b.lons[i],
+      time: b.times[i],
+      normal: new THREE.Vector3(b.normals[i * 3], b.normals[i * 3 + 1], b.normals[i * 3 + 2]),
+      feature: {
+        id: p.id,
+        properties: { place: p.place, url: p.url, tsunami: p.tsunami, felt: p.felt, time: b.times[i], mag: b.mags[i] },
+      },
+    };
+  }
+
+  indexOfId(id) {
+    return this.buf ? this.buf.props.findIndex(p => p.id === id) : -1;
   }
 
   get activeMesh() {
     return this.mode === 'depth' ? this.depthMesh : this.mesh;
   }
 
-  writeMatrix(i, q, boost = 1) {
+  // No allocation: scratch vectors only (runs count× per visibility pass)
+  writeMatrix(i, boost = 1) {
+    const b = this.buf;
+    _normal.set(b.normals[i * 3], b.normals[i * 3 + 1], b.normals[i * 3 + 2]);
     if (this.mode === 'depth') {
-      const r = R - (q.depth / KM_PER_UNIT) * DEPTH_EXAGGERATION;
-      const s = Math.max(0.45, q.mag * 0.3) * boost;
-      _scale.set(s, s, s);
-      _mat4.compose(q.normal.clone().multiplyScalar(Math.max(r, 5)), _quat.identity(), _scale);
+      const r = Math.max(R - (b.depths[i] / KM_PER_UNIT) * DEPTH_EXAGGERATION, 5);
+      const s = Math.max(0.45, b.mags[i] * 0.3) * boost;
+      _mat4.compose(_pos.copy(_normal).multiplyScalar(r), _quat.identity(), _scale.setScalar(s));
       this.depthMesh.setMatrixAt(i, _mat4);
     } else {
-      _quat.setFromUnitVectors(UP, q.normal);
-      _scale.set(q.w * boost, q.h * boost, q.w * boost);
-      _mat4.compose(q.normal.clone().multiplyScalar(R), _quat, _scale);
+      _quat.setFromUnitVectors(UP, _normal);
+      _scale.set(b.widths[i] * boost, b.heights[i] * boost, b.widths[i] * boost);
+      _mat4.compose(_pos.copy(_normal).multiplyScalar(R), _quat, _scale);
       this.mesh.setMatrixAt(i, _mat4);
     }
   }
@@ -132,11 +147,7 @@ export class QuakeMarkers {
   setMode(mode) {
     if (this.mode === mode) return;
     // settle any active flashes in the old mode before switching
-    for (const i of this.flashing) {
-      const q = this.quakes[i];
-      this.activeMesh.setColorAt(i, this.mode === 'depth' ? depthColor(q.depth, _color) : _color.set(q.color));
-      q.flashUntil = 0;
-    }
+    for (const i of this.flashing) this.restoreColor(i);
     this.flashing.clear();
     this.setHovered(null);
     this.mode = mode;
@@ -156,45 +167,50 @@ export class QuakeMarkers {
   setTimeCutoff(t, { flash = false } = {}) {
     const prev = this.timeCutoff;
     this.timeCutoff = t;
-    if (flash && t > prev) {
+    if (flash && t > prev && this.buf) {
       const nowMs = performance.now();
-      this.quakes.forEach((q, i) => {
-        if (q.time > prev && q.time <= t && q.mag >= this.minMag) {
-          q.flashUntil = nowMs + FLASH_MS;
+      const b = this.buf;
+      for (let i = 0; i < b.count; i++) {
+        if (b.times[i] > prev && b.times[i] <= t && b.mags[i] >= this.minMag) {
+          this.flashUntil ??= new Float64Array(CAPACITY);
+          this.flashUntil[i] = nowMs + FLASH_MS;
           this.flashing.add(i);
         }
-      });
+      }
     }
     this.updateVisibility();
   }
 
   // Hidden instances get a zero-scale matrix: not rendered, not raycast-hittable
   updateVisibility() {
-    const mesh = this.activeMesh;
-    this.quakes.forEach((q, i) => {
-      q.shown = q.mag >= this.minMag && q.time <= this.timeCutoff;
-      if (q.shown) this.writeMatrix(i, q);
+    if (!this.buf) return;
+    const b = this.buf, mesh = this.activeMesh;
+    for (let i = 0; i < b.count; i++) {
+      const on = b.mags[i] >= this.minMag && b.times[i] <= this.timeCutoff;
+      this.shown[i] = on ? 1 : 0;
+      if (on) this.writeMatrix(i);
       else mesh.setMatrixAt(i, ZERO);
-      if (q.ring) q.ring.visible = q.shown;
-    });
+    }
+    for (const ring of this.pulseRings) ring.visible = this.shown[ring.userData.index] === 1;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
   }
 
-  addPulseRing(q) {
+  addPulseRing(i) {
+    const b = this.buf;
+    const color = new THREE.Color().setRGB(b.surfColors[i * 3], b.surfColors[i * 3 + 1], b.surfColors[i * 3 + 2])
+      .multiplyScalar(1.7); // HDR → blooms
     const ring = new THREE.Mesh(
       this.ringGeo,
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(q.color).multiplyScalar(1.7), // HDR → blooms
-        transparent: true, opacity: 0.8, side: THREE.DoubleSide,
-      })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
     );
-    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), q.normal);
-    ring.position.copy(q.normal).multiplyScalar(R + 0.3);
-    ring.userData.baseScale = Math.max(1.5, q.mag * 1.2);
+    _normal.set(b.normals[i * 3], b.normals[i * 3 + 1], b.normals[i * 3 + 2]);
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), _normal);
+    ring.position.copy(_normal).multiplyScalar(R + 0.3);
+    ring.userData.baseScale = Math.max(1.5, b.mags[i] * 1.2);
+    ring.userData.index = i;
     this.ringGroup.add(ring);
     this.pulseRings.push(ring);
-    q.ring = ring;
   }
 
   clearRings() {
@@ -203,84 +219,104 @@ export class QuakeMarkers {
     this.pulseRings = [];
   }
 
-  baseColor(q, target = _color) {
-    return this.mode === 'depth' ? depthColor(q.depth, target) : target.set(q.color);
+  // write the pristine (worker-computed) color for instance i back into the
+  // active mesh's color attribute
+  restoreColor(i) {
+    const src = this.mode === 'depth' ? this.buf.depthColors : this.buf.surfColors;
+    const attr = this.activeMesh.instanceColor;
+    attr.array[i * 3] = src[i * 3];
+    attr.array[i * 3 + 1] = src[i * 3 + 1];
+    attr.array[i * 3 + 2] = src[i * 3 + 2];
+    attr.needsUpdate = true;
   }
 
-  // → { id, quake } or null. instanceId indexes straight into this.quakes.
+  baseColor(i, target = _color) {
+    const src = this.mode === 'depth' ? this.buf.depthColors : this.buf.surfColors;
+    return target.setRGB(src[i * 3], src[i * 3 + 1], src[i * 3 + 2]);
+  }
+
+  writeColor(i, c) {
+    const attr = this.activeMesh.instanceColor;
+    attr.array[i * 3] = c.r;
+    attr.array[i * 3 + 1] = c.g;
+    attr.array[i * 3 + 2] = c.b;
+    attr.needsUpdate = true;
+  }
+
+  // → { id, quake } or null. instanceId indexes straight into the SoA arrays.
   pick(raycaster) {
     const hits = raycaster.intersectObject(this.activeMesh);
     if (!hits.length) return null;
     const id = hits[0].instanceId;
-    const q = this.quakes[id];
-    return q && q.shown ? { id, quake: q } : null;
+    return this.shown[id] ? { id, quake: this.view(id) } : null;
   }
 
   setHovered(id) {
     if (this.hoveredId === id) return;
-    const mesh = this.activeMesh;
     if (this.hoveredId !== null && !this.flashing.has(this.hoveredId)) {
-      const prev = this.quakes[this.hoveredId];
-      if (prev) mesh.setColorAt(this.hoveredId, this.baseColor(prev));
+      this.restoreColor(this.hoveredId);
     }
     this.hoveredId = id;
-    if (id !== null) {
-      const q = this.quakes[id];
-      mesh.setColorAt(id, this.baseColor(q).lerp(WHITE, 0.45));
-    }
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    if (id !== null) this.writeColor(id, this.baseColor(id).lerp(WHITE, 0.45));
   }
 
   update(t) {
-    this.pulseRings.forEach((r, i) => {
+    for (let i = 0; i < this.pulseRings.length; i++) {
+      const r = this.pulseRings[i];
       const s = r.userData.baseScale * (1 + 0.5 * Math.sin(t * 3 + i));
       r.scale.set(s, s, s);
       r.material.opacity = 0.35 + 0.35 * Math.sin(t * 3 + i);
-    });
+    }
 
     if (this.flashing.size) {
       const mesh = this.activeMesh;
       const nowMs = performance.now();
-      let colorDirty = false;
       for (const i of this.flashing) {
-        const q = this.quakes[i];
-        const remain = (q.flashUntil - nowMs) / FLASH_MS;
-        if (remain <= 0 || !q.shown) {
+        const remain = (this.flashUntil[i] - nowMs) / FLASH_MS;
+        if (remain <= 0 || !this.shown[i]) {
           this.flashing.delete(i);
-          mesh.setColorAt(i, this.baseColor(q));
-          if (q.shown) this.writeMatrix(i, q);
+          this.restoreColor(i);
+          if (this.shown[i]) this.writeMatrix(i);
         } else {
           // bright white + oversized at birth, easing back to normal
-          mesh.setColorAt(i, this.baseColor(q).lerp(WHITE, remain * 0.9));
-          this.writeMatrix(i, q, 1 + remain * 1.6);
+          this.writeColor(i, this.baseColor(i).lerp(WHITE, remain * 0.9));
+          this.writeMatrix(i, 1 + remain * 1.6);
         }
-        colorDirty = true;
       }
-      if (colorDirty) {
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        mesh.instanceMatrix.needsUpdate = true;
-      }
+      mesh.instanceMatrix.needsUpdate = true;
     }
   }
 
   visibleStats() {
-    let count = 0, max = -Infinity, maxPlace = '';
-    for (const q of this.quakes) {
-      if (!q.shown) continue;
+    let count = 0, max = -Infinity, maxIdx = -1;
+    const b = this.buf;
+    if (b) for (let i = 0; i < b.count; i++) {
+      if (!this.shown[i]) continue;
       count++;
-      if (q.mag > max) { max = q.mag; maxPlace = q.feature.properties.place || ''; }
+      if (b.mags[i] > max) { max = b.mags[i]; maxIdx = i; }
     }
-    return { count, max, maxPlace };
+    return { count, max, maxPlace: maxIdx >= 0 ? b.props[maxIdx].place : '' };
   }
 
   // [earliest, latest] event time in the loaded window
   timeExtent() {
-    if (!this.quakes.length) return null;
+    const b = this.buf;
+    if (!b || !b.count) return null;
     let min = Infinity, max = -Infinity;
-    for (const q of this.quakes) {
-      if (q.time < min) min = q.time;
-      if (q.time > max) max = q.time;
+    for (let i = 0; i < b.count; i++) {
+      if (b.times[i] < min) min = b.times[i];
+      if (b.times[i] > max) max = b.times[i];
     }
     return [min, max];
+  }
+
+  // top-k views by magnitude (built once per data load for the sidebar)
+  topByMag(k = 10) {
+    const b = this.buf;
+    if (!b) return [];
+    const idx = Array.from({ length: b.count }, (_, i) => i)
+      .sort((a, c) => b.mags[c] - b.mags[a])
+      .slice(0, k);
+    return idx.map(i => this.view(i));
   }
 }

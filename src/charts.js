@@ -31,29 +31,41 @@ function chart(title, inner) {
   return `<div class="chart"><div class="chart-title">${title}</div>${inner}</div>`;
 }
 
-function magHistogram(quakes) {
-  if (!quakes.length) return '';
-  const lo = Math.floor(Math.min(...quakes.map(q => q.mag)) * 2) / 2;
-  const hi = Math.ceil(Math.max(...quakes.map(q => q.mag)) * 2) / 2;
+// Each histogram scans the worker's typed arrays directly (no object churn);
+// events below minMag are skipped to match what the globe shows.
+function magHistogram(buf, minMag) {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < buf.count; i++) {
+    const m = buf.mags[i];
+    if (m < minMag) continue;
+    if (m < lo) lo = m;
+    if (m > hi) hi = m;
+  }
+  if (lo === Infinity) return '';
+  lo = Math.floor(lo * 2) / 2;
+  hi = Math.ceil(hi * 2) / 2;
   const n = Math.max(Math.round((hi - lo) / 0.5), 1);
   const bins = Array.from({ length: n }, (_, i) => ({ m: lo + (i + 0.5) * 0.5, n: 0 }));
-  for (const q of quakes) {
-    const i = Math.min(Math.floor((q.mag - lo) / 0.5), n - 1);
-    bins[i].n++;
+  for (let i = 0; i < buf.count; i++) {
+    if (buf.mags[i] < minMag) continue;
+    bins[Math.min(Math.floor((buf.mags[i] - lo) / 0.5), n - 1)].n++;
   }
   const svg = svgOpen() + bars(bins, b => hex(magColor(b.m))) +
     label(0, 'M' + lo.toFixed(1)) + label(W, 'M' + hi.toFixed(1), 'end') + '</svg>';
   return chart('Magnitude', svg);
 }
 
-function timeHistogram(quakes, start, end) {
-  if (!quakes.length || end <= start) return '';
+function timeHistogram(buf, minMag, start, end) {
+  if (end <= start) return '';
   const n = 36;
   const bins = Array.from({ length: n }, () => ({ n: 0 }));
-  for (const q of quakes) {
-    const i = Math.min(Math.floor(((q.time - start) / (end - start)) * n), n - 1);
-    bins[i].n++;
+  let any = false;
+  for (let i = 0; i < buf.count; i++) {
+    if (buf.mags[i] < minMag) continue;
+    any = true;
+    bins[Math.min(Math.floor(((buf.times[i] - start) / (end - start)) * n), n - 1)].n++;
   }
+  if (!any) return '';
   const short = end - start < 2 * 86400000;
   const fmt = t => short
     ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -63,23 +75,26 @@ function timeHistogram(quakes, start, end) {
   return chart('Quakes over time', svg);
 }
 
-function depthHistogram(quakes) {
-  if (!quakes.length) return '';
+function depthHistogram(buf, minMag) {
   const n = 14, binKm = 50; // 0–700 km
   const bins = Array.from({ length: n }, (_, i) => ({ km: (i + 0.5) * binKm, n: 0 }));
-  for (const q of quakes) {
-    const i = Math.min(Math.max(Math.floor(q.depth / binKm), 0), n - 1);
-    bins[i].n++;
+  let any = false;
+  for (let i = 0; i < buf.count; i++) {
+    if (buf.mags[i] < minMag) continue;
+    any = true;
+    bins[Math.min(Math.max(Math.floor(buf.depths[i] / binKm), 0), n - 1)].n++;
   }
+  if (!any) return '';
   const svg = svgOpen() + bars(bins, b => '#' + depthColor(b.km).getHexString()) +
     label(0, '0 km') + label(W, '700 km', 'end') + '</svg>';
   return chart('Depth', svg);
 }
 
-// quakes: already filtered to what the globe shows (min magnitude)
-export function renderCharts(container, quakes, windowStart, windowEnd) {
+// buf: the feed worker's SoA buffer; minMag mirrors the globe's filter
+export function renderCharts(container, buf, minMag, windowStart, windowEnd) {
+  if (!buf) { container.innerHTML = ''; return; }
   container.innerHTML =
-    magHistogram(quakes) +
-    timeHistogram(quakes, windowStart, windowEnd) +
-    depthHistogram(quakes);
+    magHistogram(buf, minMag) +
+    timeHistogram(buf, minMag, windowStart, windowEnd) +
+    depthHistogram(buf, minMag);
 }

@@ -9,13 +9,13 @@ export class LiveUpdater {
   constructor({ getFeed, canApply, onUpdate }) {
     this.getFeed = getFeed;   // () => current feed name
     this.canApply = canApply; // () => false to skip a cycle (e.g. mid-playback)
-    this.onUpdate = onUpdate; // (features, newFeatures) =>
+    this.onUpdate = onUpdate; // (buf, freshIndices) =>
     this.knownIds = new Set();
     this.timer = null;
   }
 
-  rememberIds(features) {
-    this.knownIds = new Set(features.map(f => f.id));
+  rememberIds(buf) {
+    this.knownIds = new Set(buf.props.map(p => p.id));
   }
 
   start() {
@@ -31,10 +31,13 @@ export class LiveUpdater {
   async refresh() {
     if (!this.canApply()) return;
     try {
-      const features = await fetchFeed(this.getFeed(), { force: true });
-      const fresh = features.filter(f => !this.knownIds.has(f.id));
-      this.rememberIds(features);
-      this.onUpdate(features, fresh);
+      const buf = await fetchFeed(this.getFeed(), { force: true });
+      const fresh = [];
+      for (let i = 0; i < buf.count; i++) {
+        if (!this.knownIds.has(buf.props[i].id)) fresh.push(i);
+      }
+      this.rememberIds(buf);
+      this.onUpdate(buf, fresh);
     } catch (e) {
       console.warn('Live refresh failed, will retry next cycle:', e);
     }

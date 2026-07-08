@@ -1,36 +1,46 @@
+// Thin client for the feed worker: URL building + response caching here,
+// fetch/parse/math in src/feed-worker.js (retry+backoff lives there too).
 const FEED_BASE = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/';
 const QUERY_BASE = 'https://earthquake.usgs.gov/fdsnws/event/1/query';
 const TTL = 5 * 60 * 1000; // don't re-hit USGS more than every 5 min per feed
-const RETRIES = [1000, 3000, 9000]; // backoff before giving up
 export const QUERY_LIMIT = 15000; // marker capacity; fdsnws caps at 20k anyway
 
-const cache = new Map(); // url → { time, features }
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const cache = new Map(); // url → { time, buf }
+let worker = null;
+let seq = 0;
+const pending = new Map(); // request id → { resolve, reject }
 
-async function fetchGeoJSON(url, { force = false } = {}) {
+function ensureWorker() {
+  if (worker) return worker;
+  worker = new Worker(new URL('./feed-worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = e => {
+    const { id, ok, buf, error } = e.data;
+    const p = pending.get(id);
+    if (!p) return;
+    pending.delete(id);
+    ok ? p.resolve(buf) : p.reject(new Error(error));
+  };
+  return worker;
+}
+
+function request(url, { force = false } = {}) {
   const hit = cache.get(url);
-  if (!force && hit && Date.now() - hit.time < TTL) return hit.features;
-
-  let lastError;
-  for (let attempt = 0; attempt <= RETRIES.length; attempt++) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('USGS error: HTTP ' + res.status);
-      const json = await res.json();
-      // mag can be null — skip those (data contract)
-      const features = json.features.filter(f => f.properties.mag !== null && f.properties.mag !== undefined);
-      cache.set(url, { time: Date.now(), features });
-      return features;
-    } catch (e) {
-      lastError = e;
-      if (attempt < RETRIES.length) await sleep(RETRIES[attempt]);
-    }
-  }
-  throw lastError;
+  if (!force && hit && Date.now() - hit.time < TTL) return Promise.resolve(hit.buf);
+  return new Promise((resolve, reject) => {
+    const id = ++seq;
+    pending.set(id, {
+      resolve(buf) {
+        cache.set(url, { time: Date.now(), buf });
+        resolve(buf);
+      },
+      reject,
+    });
+    ensureWorker().postMessage({ id, url });
+  });
 }
 
 export function fetchFeed(feed, opts) {
-  return fetchGeoJSON(FEED_BASE + feed + '.geojson', opts);
+  return request(FEED_BASE + feed + '.geojson', opts);
 }
 
 // Historical archive — any date range back to ~1900, optional circular region.
@@ -49,5 +59,5 @@ export function queryEvents({ start, end, minMag, region }) {
     p.set('longitude', String(region.lon));
     p.set('maxradiuskm', String(region.km));
   }
-  return fetchGeoJSON(QUERY_BASE + '?' + p);
+  return request(QUERY_BASE + '?' + p);
 }

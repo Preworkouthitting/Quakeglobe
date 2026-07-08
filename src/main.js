@@ -59,21 +59,20 @@ function selectQuake(q, { fly = true } = {}) {
 }
 
 function refreshCharts() {
-  const minMag = parseFloat(ui.els.minMag.value);
-  renderCharts(ui.els.charts, markers.quakes.filter(q => q.mag >= minMag), timeline.start, timeline.end);
+  renderCharts(ui.els.charts, markers.buf, parseFloat(ui.els.minMag.value), timeline.start, timeline.end);
 }
 
-function applyFeatures(features) {
-  markers.setData(features);
+function applyFeatures(buf) {
+  markers.setBuffer(buf);
   const extent = markers.timeExtent();
   if (extent) timeline.setWindow(extent[0], extent[1]);
   ui.updateStats(markers.visibleStats());
-  ui.renderSigList(markers.quakes, q => selectQuake(q));
+  ui.renderSigList(markers.topByMag(10), q => selectQuake(q));
   refreshCharts();
   if (pendingQuakeId) {
-    const q = markers.quakes.find(x => x.feature.id === pendingQuakeId);
+    const i = markers.indexOfId(pendingQuakeId);
     pendingQuakeId = null;
-    if (q) selectQuake(q, { fly: !initialCamera });
+    if (i >= 0) selectQuake(markers.view(i), { fly: !initialCamera });
   }
 }
 
@@ -126,9 +125,9 @@ async function loadFeed(feed) {
   historical = null;
   ui.els.histNote.textContent = '';
   try {
-    const features = await fetchFeed(feed); // retries with backoff internally
-    applyFeatures(features);
-    live.rememberIds(features);
+    const buf = await fetchFeed(feed); // worker retries with backoff internally
+    applyFeatures(buf);
+    live.rememberIds(buf);
     ui.hideBanner();
   } catch (e) {
     console.error('Feed error:', e);
@@ -144,15 +143,15 @@ async function loadHistorical(params) {
   clearTimeout(retryTimer);
   ui.els.histGo.disabled = true;
   try {
-    const features = await queryEvents(params);
+    const buf = await queryEvents(params);
     historical = params;
     ui.els.feed.value = '__hist'; // canned-feed select shows "Historical query"
-    applyFeatures(features);
+    applyFeatures(buf);
     ui.hideBanner();
     updateDeepLink();
-    ui.els.histNote.textContent = features.length >= QUERY_LIMIT
+    ui.els.histNote.textContent = buf.count >= QUERY_LIMIT
       ? `Showing the ${QUERY_LIMIT} largest events — narrow the range for all`
-      : `${features.length} events loaded`;
+      : `${buf.count} events loaded`;
   } catch (e) {
     console.error('Archive query error:', e);
     ui.els.histNote.textContent = 'Query failed — check the date range';
@@ -180,16 +179,16 @@ const live = new LiveUpdater({
   getFeed: () => ui.els.feed.value,
   // don't refresh over historical results or an active playback/scrub session
   canApply: () => !historical && !timeline.playing && timeline.cutoff >= timeline.end,
-  onUpdate(features, fresh) {
-    applyFeatures(features);
+  onUpdate(buf, fresh) {
+    applyFeatures(buf);
     if (!fresh.length) return;
-    for (const f of fresh) {
-      const [lon, lat] = f.geometry.coordinates;
-      const q = markers.quakes.find(x => x.feature.id === f.id);
-      if (q) shockwaves.spawn(q.normal, magColor(q.mag), q.mag);
+    let top = fresh[0];
+    for (const i of fresh) {
+      const v = markers.view(i);
+      shockwaves.spawn(v.normal, magColor(v.mag), v.mag);
+      if (buf.mags[i] > buf.mags[top]) top = i;
     }
-    const top = fresh.reduce((a, b) => (b.properties.mag > a.properties.mag ? b : a));
-    ui.showToast(`<b>${fresh.length} new quake${fresh.length > 1 ? 's' : ''}</b> — strongest M${top.properties.mag.toFixed(1)}, ${ui.escapeHTML(top.properties.place || 'unknown location')}`);
+    ui.showToast(`<b>${fresh.length} new quake${fresh.length > 1 ? 's' : ''}</b> — strongest M${buf.mags[top].toFixed(1)}, ${ui.escapeHTML(buf.props[top].place || 'unknown location')}`);
     ping.play();
   },
 });
