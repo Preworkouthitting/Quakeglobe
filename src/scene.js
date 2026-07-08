@@ -18,9 +18,15 @@ export function createScene(container) {
   const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 1, 2000);
   camera.position.z = 320;
 
+  // Cap dpr at 2; drop to 1.5 on very dense screens or very wide canvases —
+  // with MSAA + bloom the fill-rate cost outruns any visible gain up there
+  function targetPixelRatio() {
+    if (devicePixelRatio >= 3 || innerWidth > 2560) return Math.min(devicePixelRatio, 1.5);
+    return Math.min(devicePixelRatio, 2);
+  }
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(targetPixelRatio());
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
   container.appendChild(renderer.domElement);
@@ -76,6 +82,8 @@ export function createScene(container) {
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(targetPixelRatio());
+    composer.setPixelRatio(targetPixelRatio());
     renderer.setSize(innerWidth, innerHeight);
     composer.setSize(innerWidth, innerHeight);
   });
