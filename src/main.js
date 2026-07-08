@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createScene } from './scene.js';
+import { createScene, latLonToVec3 } from './scene.js';
 import { createGlobe } from './globe.js';
 import { QuakeMarkers } from './markers.js';
 import { createPlateBoundaries } from './plates.js';
@@ -7,6 +7,7 @@ import { fetchFeed, queryEvents, QUERY_LIMIT } from './data.js';
 import { LiveUpdater, Shockwaves, Ping } from './live.js';
 import { magColor } from './markers.js';
 import { Timeline } from './timeline.js';
+import { updateHash, readHash } from './deeplink.js';
 import * as ui from './ui.js';
 
 const app = createScene(document.getElementById('canvas-wrap'));
@@ -42,15 +43,24 @@ ui.els.playBtn.addEventListener('click', () => timeline.toggle());
 ui.els.scrub.addEventListener('input', e => timeline.seek(e.target.value / 1000));
 
 // ---------- Data ----------
+function selectQuake(q, { fly = true } = {}) {
+  selectedQuake = q.feature.id;
+  ui.showDetail(q);
+  if (fly) app.flyTo(q.normal);
+  updateDeepLink();
+}
+
 function applyFeatures(features) {
   markers.setData(features);
   const extent = markers.timeExtent();
   if (extent) timeline.setWindow(extent[0], extent[1]);
   ui.updateStats(markers.visibleStats());
-  ui.renderSigList(markers.quakes, q => {
-    app.flyTo(q.normal);
-    ui.showDetail(q);
-  });
+  ui.renderSigList(markers.quakes, q => selectQuake(q));
+  if (pendingQuakeId) {
+    const q = markers.quakes.find(x => x.feature.id === pendingQuakeId);
+    pendingQuakeId = null;
+    if (q) selectQuake(q, { fly: !initialCamera });
+  }
 }
 
 // Circular regions for the historical archive (lat, lon, radius km)
@@ -66,6 +76,35 @@ const REGIONS = {
 
 let historical = null; // active archive query params, or null for live feeds
 let retryTimer = null;
+let selectedQuake = null;  // event id shown in the detail card
+let pendingQuakeId = null; // from a deep link, resolved after data loads
+let initialCamera = false; // deep link framed the camera already
+
+// ---------- Deep links ----------
+function cameraState() {
+  const p = app.camera.position;
+  const r = p.length();
+  const lat = Math.asin(p.y / r) * 180 / Math.PI;
+  const lon = ((Math.atan2(p.z, -p.x) * 180 / Math.PI - 180 + 540) % 360) - 180;
+  return [+lat.toFixed(1), +lon.toFixed(1), Math.round(r)];
+}
+
+function updateDeepLink() {
+  updateHash({
+    feed: ui.els.feed.value,
+    hist: historical,
+    minMag: parseFloat(ui.els.minMag.value),
+    depth: ui.els.depthMode.checked,
+    plates: ui.els.plates.checked,
+    cam: cameraState(),
+    quake: ui.els.detail.style.display === 'block' ? selectedQuake : null,
+  });
+}
+app.controls.addEventListener('end', updateDeepLink);
+ui.els.detailClose.addEventListener('click', () => {
+  selectedQuake = null;
+  updateDeepLink();
+});
 
 async function loadFeed(feed) {
   ui.setLoading(true);
@@ -96,6 +135,7 @@ async function loadHistorical(params) {
     ui.els.feed.value = '__hist'; // canned-feed select shows "Historical query"
     applyFeatures(features);
     ui.hideBanner();
+    updateDeepLink();
     ui.els.histNote.textContent = features.length >= QUERY_LIMIT
       ? `Showing the ${QUERY_LIMIT} largest events — narrow the range for all`
       : `${features.length} events loaded`;
@@ -117,6 +157,7 @@ ui.els.histGo.addEventListener('click', () => {
     start, end,
     minMag: parseFloat(ui.els.histMag.value),
     region: REGIONS[ui.els.histRegion.value] || null,
+    regionKey: ui.els.histRegion.value,
   });
 });
 
@@ -187,22 +228,27 @@ app.renderer.domElement.addEventListener('click', e => {
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
   const hit = pickAtPointer();
-  if (hit) ui.showDetail(hit.quake);
+  if (hit) selectQuake(hit.quake, { fly: false });
 });
 
 // ---------- UI wiring ----------
-ui.els.feed.addEventListener('change', e => loadFeed(e.target.value));
+ui.els.feed.addEventListener('change', e => {
+  loadFeed(e.target.value);
+  updateDeepLink();
+});
 ui.els.minMag.addEventListener('input', e => {
   const v = parseFloat(e.target.value);
   ui.els.magVal.textContent = v.toFixed(1);
   markers.setMinMag(v);
   ui.updateStats(markers.visibleStats());
+  updateDeepLink();
 });
 ui.els.spin.addEventListener('change', e => {
   app.controls.autoRotate = e.target.checked;
 });
 ui.els.plates.addEventListener('change', e => {
   plates.visible = e.target.checked;
+  updateDeepLink();
 });
 ui.els.depthMode.addEventListener('change', e => {
   const on = e.target.checked;
@@ -210,9 +256,57 @@ ui.els.depthMode.addEventListener('change', e => {
   globe.setDepthMode(on);
   ui.els.legendMag.style.display = on ? 'none' : '';
   ui.els.legendDepth.style.display = on ? '' : 'none';
+  updateDeepLink();
 });
 
-loadFeed(ui.els.feed.value);
+// ---------- Boot: restore deep-linked state, then load ----------
+{
+  const initial = readHash();
+  if (initial) {
+    if (initial.minMag > 0) {
+      ui.els.minMag.value = initial.minMag;
+      ui.els.magVal.textContent = initial.minMag.toFixed(1);
+      markers.setMinMag(initial.minMag);
+    }
+    if (initial.depth) {
+      ui.els.depthMode.checked = true;
+      ui.els.depthMode.dispatchEvent(new Event('change'));
+    }
+    if (!initial.plates) {
+      ui.els.plates.checked = false;
+      ui.els.plates.dispatchEvent(new Event('change'));
+    }
+    if (initial.cam) {
+      initialCamera = true;
+      ui.els.spin.checked = false; // hold the shared framing
+      app.controls.autoRotate = false;
+      const dist = Math.min(Math.max(initial.cam[2], 130), 600);
+      app.camera.position.copy(latLonToVec3(initial.cam[0], initial.cam[1], dist));
+      app.controls.update();
+    }
+    pendingQuakeId = initial.quake;
+    if (initial.hist) {
+      ui.els.histBox.open = true;
+      ui.els.histStart.value = initial.hist.start;
+      ui.els.histEnd.value = initial.hist.end;
+      ui.els.histMag.value = String(initial.hist.minMag);
+      ui.els.histRegion.value = initial.hist.regionKey;
+      loadHistorical({
+        start: initial.hist.start,
+        end: initial.hist.end,
+        minMag: initial.hist.minMag,
+        region: REGIONS[initial.hist.regionKey] || null,
+        regionKey: initial.hist.regionKey,
+      });
+    } else {
+      const valid = [...ui.els.feed.options].some(o => o.value === initial.feed);
+      if (valid) ui.els.feed.value = initial.feed;
+      loadFeed(ui.els.feed.value);
+    }
+  } else {
+    loadFeed(ui.els.feed.value);
+  }
+}
 
 if (import.meta.env.DEV) {
   // dev-only handle for browser-console verification

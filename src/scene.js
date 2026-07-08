@@ -136,6 +136,7 @@ export function createScene(container) {
       if (flight.t >= 1) {
         controls.autoRotate = flight.resumeAutoRotate;
         flight = null;
+        controls.dispatchEvent({ type: 'end' }); // camera landed — listeners sync
       }
     }
     controls.update();
