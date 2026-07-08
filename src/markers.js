@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MeshBVH } from 'three-mesh-bvh';
 import { R } from './scene.js';
 
 const CAPACITY = 15000; // all_month is ~10k events; leave headroom
@@ -29,11 +30,15 @@ const KM_PER_UNIT = 6371 / R;
 const DEPTH_EXAGGERATION = 3;
 
 const _mat4 = new THREE.Matrix4();
+const _inv = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 const _pos = new THREE.Vector3();
 const _normal = new THREE.Vector3();
 const _color = new THREE.Color();
+const _sphere = new THREE.Sphere();
+const _ray = new THREE.Ray();
+const _wp = new THREE.Vector3();
 const WHITE = new THREE.Color(0xffffff);
 const UP = new THREE.Vector3(0, 1, 0);
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -47,6 +52,7 @@ export class QuakeMarkers {
     // Unit cone, base at origin, tip at +Y — per-instance scale sets width/height
     const geo = new THREE.ConeGeometry(1, 1, 6);
     geo.translate(0, 0.5, 0);
+    this.coneBVH = new MeshBVH(geo); // narrow-phase raycast in unit space
     this.material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.92 });
     this.material.color.setScalar(GLOW); // diffuse = color × instanceColor
     this.mesh = new THREE.InstancedMesh(geo, this.material, CAPACITY);
@@ -56,6 +62,7 @@ export class QuakeMarkers {
 
     // Depth mode: spheres below the surface at (exaggerated) true depth
     const depthGeo = new THREE.SphereGeometry(1, 8, 6);
+    this.sphereBVH = new MeshBVH(depthGeo);
     this.depthMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85 });
     this.depthMaterial.color.setScalar(GLOW * 0.8); // deep violets need less push
     this.depthMesh = new THREE.InstancedMesh(depthGeo, this.depthMaterial, CAPACITY);
@@ -96,6 +103,27 @@ export class QuakeMarkers {
     this.depthMesh.instanceColor = new THREE.InstancedBufferAttribute(buf.depthColors.slice(), 3);
 
     for (let i = 0; i < buf.count; i++) if (buf.recent[i]) this.addPulseRing(i);
+
+    // Broad-phase pick spheres, one per instance per mode (static per buffer)
+    const n = buf.count;
+    this.surfCenters = new Float32Array(n * 3);
+    this.surfRadii = new Float32Array(n);
+    this.depthCenters = new Float32Array(n * 3);
+    this.depthRadii = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const nx = buf.normals[i * 3], ny = buf.normals[i * 3 + 1], nz = buf.normals[i * 3 + 2];
+      const h = buf.heights[i];
+      const rs = R + h / 2; // cone spans R..R+h along the normal
+      this.surfCenters[i * 3] = nx * rs;
+      this.surfCenters[i * 3 + 1] = ny * rs;
+      this.surfCenters[i * 3 + 2] = nz * rs;
+      this.surfRadii[i] = h / 2 + buf.widths[i];
+      const rd = Math.max(R - (buf.depths[i] / KM_PER_UNIT) * DEPTH_EXAGGERATION, 5);
+      this.depthCenters[i * 3] = nx * rd;
+      this.depthCenters[i * 3 + 1] = ny * rd;
+      this.depthCenters[i * 3 + 2] = nz * rd;
+      this.depthRadii[i] = Math.max(0.45, buf.mags[i] * 0.3);
+    }
 
     this.timeCutoff = Infinity;
     this.updateVisibility();
@@ -243,12 +271,33 @@ export class QuakeMarkers {
     attr.needsUpdate = true;
   }
 
-  // → { id, quake } or null. instanceId indexes straight into the SoA arrays.
+  // → { id, quake } or null. Two phases: a typed-array bounding-sphere scan
+  // (no matrix inverts for the ~10k misses), then BVH raycast in unit space
+  // for the handful of candidates. Allocation-free until a hit builds a view.
   pick(raycaster) {
-    const hits = raycaster.intersectObject(this.activeMesh);
-    if (!hits.length) return null;
-    const id = hits[0].instanceId;
-    return this.shown[id] ? { id, quake: this.view(id) } : null;
+    if (!this.buf) return null;
+    const depth = this.mode === 'depth';
+    const centers = depth ? this.depthCenters : this.surfCenters;
+    const radii = depth ? this.depthRadii : this.surfRadii;
+    const bvh = depth ? this.sphereBVH : this.coneBVH;
+    const mesh = this.activeMesh;
+    const ray = raycaster.ray;
+    let bestId = -1, bestDistSq = Infinity;
+    for (let i = 0; i < this.buf.count; i++) {
+      if (!this.shown[i]) continue;
+      _sphere.center.set(centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2]);
+      _sphere.radius = radii[i];
+      if (!ray.intersectsSphere(_sphere)) continue;
+      mesh.getMatrixAt(i, _mat4);
+      _ray.copy(ray).applyMatrix4(_inv.copy(_mat4).invert());
+      const hit = bvh.raycastFirst(_ray, THREE.DoubleSide);
+      if (hit) {
+        _wp.copy(hit.point).applyMatrix4(_mat4);
+        const d = _wp.distanceToSquared(ray.origin);
+        if (d < bestDistSq) { bestDistSq = d; bestId = i; }
+      }
+    }
+    return bestId >= 0 ? { id: bestId, quake: this.view(bestId) } : null;
   }
 
   setHovered(id) {
