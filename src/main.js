@@ -34,12 +34,17 @@ app.addActivity(() => shockwaves.isActive());
 app.addActivity(() => performance.now() - lastPointerMove < 120);
 
 // ---------- Timeline ----------
+let lastLabelSec = -1; // toLocaleString allocates; format at most once per second
 const timeline = new Timeline({
   onTime(cutoff, { flash, atEnd }) {
     markers.setTimeCutoff(cutoff, { flash });
     ui.updateStats(markers.visibleStats());
     ui.els.scrub.value = Math.round(timeline.frac() * 1000);
-    ui.els.timeLabel.textContent = atEnd ? 'now' : new Date(cutoff).toLocaleString();
+    const tick = atEnd ? -2 : (performance.now() / 250) | 0; // ≤4 formats/s
+    if (tick !== lastLabelSec) {
+      lastLabelSec = tick;
+      ui.els.timeLabel.textContent = atEnd ? 'now' : new Date(cutoff).toLocaleString();
+    }
   },
   onPlayState(playing) {
     ui.els.playBtn.textContent = playing ? '❚❚' : '▶';

@@ -116,6 +116,8 @@ export class QuakeMarkers {
     this.timeCutoff = Infinity;
     this.flashing = new Set(); // instance ids currently flashing
     this.hoveredId = null;
+    this._pickCache = { id: -1, result: null }; // hover hits reuse the view
+    this._stats = { count: 0, max: -Infinity, maxPlace: '' };
   }
 
   get count() {
@@ -129,6 +131,8 @@ export class QuakeMarkers {
     this.buf = buf;
     this.shown = new Uint8Array(buf.count);
 
+    this._pickCache.id = -1;
+    this._pickCache.result = null;
     this.mesh.count = buf.count;
     this.depthMesh.count = buf.count;
     // mutable copies — hover/flash restore from the pristine buf arrays
@@ -352,7 +356,13 @@ export class QuakeMarkers {
         if (d < bestDistSq) { bestDistSq = d; bestId = i; }
       }
     }
-    return bestId >= 0 ? { id: bestId, quake: this.view(bestId) } : null;
+    if (bestId < 0) return null;
+    // hovering the same quake across frames reuses the built view
+    if (this._pickCache.id !== bestId) {
+      this._pickCache.id = bestId;
+      this._pickCache.result = { id: bestId, quake: this.view(bestId) };
+    }
+    return this._pickCache.result;
   }
 
   setHovered(id) {
@@ -386,6 +396,8 @@ export class QuakeMarkers {
     }
   }
 
+  // returns a reused object — read it before the next call (runs per frame
+  // during timeline playback)
   visibleStats() {
     let count = 0, max = -Infinity, maxIdx = -1;
     const b = this.buf;
@@ -394,7 +406,10 @@ export class QuakeMarkers {
       count++;
       if (b.mags[i] > max) { max = b.mags[i]; maxIdx = i; }
     }
-    return { count, max, maxPlace: maxIdx >= 0 ? b.props[maxIdx].place : '' };
+    this._stats.count = count;
+    this._stats.max = max;
+    this._stats.maxPlace = maxIdx >= 0 ? b.props[maxIdx].place : '';
+    return this._stats;
   }
 
   // [earliest, latest] event time in the loaded window
