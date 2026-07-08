@@ -42,13 +42,18 @@ function toBase64(bytes) {
   return btoa(s);
 }
 
-export async function encodeAll() {
+const DEFAULT_JOBS = [
+  { src: '/textures/tmp/flip-day.png', out: 'earth-day', srgb: true },
+  { src: '/textures/tmp/flip-night.png', out: 'earth-night', srgb: true },
+  { src: '/textures/tmp/flip-water.png', out: 'earth-water', srgb: false }, // data mask
+  // 1024px variants served below the mobile breakpoint
+  { src: '/textures/tmp/flip-day-1024.png', out: 'earth-day-1024', srgb: true },
+  { src: '/textures/tmp/flip-night-1024.png', out: 'earth-night-1024', srgb: true },
+  { src: '/textures/tmp/flip-water-1024.png', out: 'earth-water-1024', srgb: false },
+];
+
+export async function encodeAll(jobs = DEFAULT_JOBS) {
   const { BasisEncoder } = await loadBasisEncoderModule();
-  const jobs = [
-    { src: '/textures/tmp/flip-day.png', out: 'earth-day', srgb: true },
-    { src: '/textures/tmp/flip-night.png', out: 'earth-night', srgb: true },
-    { src: '/textures/tmp/flip-water.png', out: 'earth-water', srgb: false }, // data mask
-  ];
   const results = {};
   for (const job of jobs) {
     const image = await loadRGBA(job.src);

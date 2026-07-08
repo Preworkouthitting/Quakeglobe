@@ -11,6 +11,10 @@ export const R = 100; // globe radius
 // so the earth itself stays clean without a second "selective" render pass.
 export const BLOOM_THRESHOLD = 1.0;
 
+// Small screens = mobile GPUs: lighter geometry, fewer stars, dpr ≤ 1.5.
+// Evaluated once at boot — real devices don't change class mid-session.
+export const LOW_POWER = matchMedia('(max-width: 820px)').matches;
+
 // Renderer, camera, lights, stars, controls, and the render loop.
 export function createScene(container) {
   const scene = new THREE.Scene();
@@ -21,7 +25,7 @@ export function createScene(container) {
   // Cap dpr at 2; drop to 1.5 on very dense screens or very wide canvases —
   // with MSAA + bloom the fill-rate cost outruns any visible gain up there
   function targetPixelRatio() {
-    if (devicePixelRatio >= 3 || innerWidth > 2560) return Math.min(devicePixelRatio, 1.5);
+    if (LOW_POWER || devicePixelRatio >= 3 || innerWidth > 2560) return Math.min(devicePixelRatio, 1.5);
     return Math.min(devicePixelRatio, 2);
   }
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -63,10 +67,11 @@ export function createScene(container) {
   // per-vertex size attribute (PointsMaterial only supports a single size)
   const starScale = { value: innerHeight / 2 }; // sizeAttenuation factor
   {
+    const q = LOW_POWER ? 0.5 : 1; // half the stars on small screens
     const tiers = [
-      { count: 750, size: 0.8, color: 0x6b7a99 },  // faint background dust
-      { count: 350, size: 1.4, color: 0x9fb0cc },  // mid stars
-      { count: 120, size: 2.2, color: 0xd8e2f5 },  // a few bright ones
+      { count: 750 * q | 0, size: 0.8, color: 0x6b7a99 },  // faint background dust
+      { count: 350 * q | 0, size: 1.4, color: 0x9fb0cc },  // mid stars
+      { count: 120 * q | 0, size: 2.2, color: 0xd8e2f5 },  // a few bright ones
     ];
     const total = tiers.reduce((s, t) => s + t.count, 0);
     const pos = new Float32Array(total * 3);

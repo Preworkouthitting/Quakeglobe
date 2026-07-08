@@ -333,7 +333,10 @@ export class QuakeMarkers {
   // → { id, quake } or null. Two phases: a typed-array bounding-sphere scan
   // (no matrix inverts for the ~10k misses), then BVH raycast in unit space
   // for the handful of candidates. Allocation-free until a hit builds a view.
-  pick(raycaster) {
+  // fatWorld > 0 (touch taps) pads every pick sphere by that many world
+  // units; if no precise geometry hit lands, the nearest padded-sphere
+  // candidate wins — fingers aren't pixel-precise.
+  pick(raycaster, fatWorld = 0) {
     if (!this.buf) return null;
     const depth = this.mode === 'depth';
     const centers = depth ? this.depthCenters : this.surfCenters;
@@ -342,11 +345,16 @@ export class QuakeMarkers {
     const mesh = this.activeMesh;
     const ray = raycaster.ray;
     let bestId = -1, bestDistSq = Infinity;
+    let nearId = -1, nearDist = Infinity; // fat fallback: closest sphere graze
     for (let i = 0; i < this.buf.count; i++) {
       if (!this.shown[i]) continue;
       _sphere.center.set(centers[i * 3], centers[i * 3 + 1], centers[i * 3 + 2]);
-      _sphere.radius = radii[i];
+      _sphere.radius = radii[i] + fatWorld;
       if (!ray.intersectsSphere(_sphere)) continue;
+      if (fatWorld > 0) {
+        const d = ray.distanceSqToPoint(_sphere.center);
+        if (d < nearDist) { nearDist = d; nearId = i; }
+      }
       mesh.getMatrixAt(i, _mat4);
       _ray.copy(ray).applyMatrix4(_inv.copy(_mat4).invert());
       const hit = bvh.raycastFirst(_ray, THREE.DoubleSide);
@@ -356,6 +364,7 @@ export class QuakeMarkers {
         if (d < bestDistSq) { bestDistSq = d; bestId = i; }
       }
     }
+    if (bestId < 0 && fatWorld > 0) bestId = nearId;
     if (bestId < 0) return null;
     // hovering the same quake across frames reuses the built view
     if (this._pickCache.id !== bestId) {

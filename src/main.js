@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { createScene, latLonToVec3 } from './scene.js';
 import { createGlobe } from './globe.js';
 import { QuakeMarkers } from './markers.js';
-import { createPlateBoundaries } from './plates.js';
 import { fetchFeed, queryEvents, QUERY_LIMIT } from './data.js';
 import { LiveUpdater, Shockwaves, Ping } from './live.js';
 import { magColor } from './markers.js';
@@ -19,8 +18,14 @@ const markers = new QuakeMarkers(app.scene);
 app.onTick(t => markers.update(t));
 app.onTick((t, dt) => globe.updateSun(dt, app.sun, app.fill));
 
-const plates = createPlateBoundaries();
-app.scene.add(plates);
+// Plate boundaries lazy-load as their own chunk (~0.5 MB of GeoJSON kept
+// out of the main bundle) — the globe paints first, lines pop in after
+let plates = null;
+import('./plates.js').then(m => {
+  plates = m.createPlateBoundaries();
+  plates.visible = ui.els.plates.checked;
+  app.scene.add(plates);
+});
 
 const shockwaves = new Shockwaves(app.scene);
 app.onTick((t, dt) => shockwaves.update(t, dt));
@@ -219,11 +224,21 @@ const pointer = new THREE.Vector2();
 let pointerPix = { x: 0, y: 0 };
 let hoverDirty = false;
 let lastPointerMove = 0;
+let lastPointerType = 'mouse';
 let downAt = { x: 0, y: 0 };
 
-function pickAtPointer() {
+// Fingers aren't pixel-precise: touch taps pad every pick sphere by ~14 css
+// pixels converted to world units at the globe's distance.
+const TOUCH_SLOP_PX = 14;
+function touchSlopWorld() {
+  const dist = app.camera.position.length() - 100; // camera → globe surface
+  const worldPerPx = (2 * dist * Math.tan((app.camera.fov * Math.PI) / 360)) / innerHeight;
+  return TOUCH_SLOP_PX * worldPerPx;
+}
+
+function pickAtPointer(fat = false) {
   raycaster.setFromCamera(pointer, app.camera);
-  return markers.pick(raycaster);
+  return markers.pick(raycaster, fat ? touchSlopWorld() : 0);
 }
 
 app.renderer.domElement.addEventListener('pointermove', e => {
@@ -252,14 +267,17 @@ app.onTick(() => {
 });
 
 app.renderer.domElement.addEventListener('pointerdown', e => {
-  downAt = { x: e.clientX, y: e.clientY };
+  downAt.x = e.clientX;
+  downAt.y = e.clientY;
+  lastPointerType = e.pointerType || 'mouse';
 });
 app.renderer.domElement.addEventListener('click', e => {
-  // distinguish click from drag
-  if (Math.abs(e.clientX - downAt.x) + Math.abs(e.clientY - downAt.y) > 6) return;
+  // distinguish click from drag (fingers wobble more than mice)
+  const slop = lastPointerType === 'touch' ? 12 : 6;
+  if (Math.abs(e.clientX - downAt.x) + Math.abs(e.clientY - downAt.y) > slop) return;
   pointer.x = (e.clientX / innerWidth) * 2 - 1;
   pointer.y = -(e.clientY / innerHeight) * 2 + 1;
-  const hit = pickAtPointer();
+  const hit = pickAtPointer(lastPointerType === 'touch');
   if (hit) selectQuake(hit.quake, { fly: false });
 });
 
@@ -280,7 +298,7 @@ ui.els.spin.addEventListener('change', e => {
   app.controls.autoRotate = e.target.checked;
 });
 ui.els.plates.addEventListener('change', e => {
-  plates.visible = e.target.checked;
+  if (plates) plates.visible = e.target.checked;
   updateDeepLink();
 });
 ui.els.depthMode.addEventListener('change', e => {

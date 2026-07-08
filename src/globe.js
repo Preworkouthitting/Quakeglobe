@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
-import { R, latLonToVec3 } from './scene.js';
+import { R, LOW_POWER, latLonToVec3 } from './scene.js';
+
+// Mobile GPUs: fewer sphere segments, 1024px texture variants
+const SEG = LOW_POWER ? 40 : 64;
+const TEX_SUFFIX = LOW_POWER ? '-1024' : '';
 
 // Self-hosted, 2048px max. KTX2 (Basis ETC1S — stays compressed on the GPU)
 // with plain JPEG as fallback; scripts/encode-ktx2.js regenerates the .ktx2
@@ -106,28 +110,32 @@ function loadJPEG(url, srgb) {
   });
 }
 
-// [day, night, water] — KTX2 first, JPEG fallback, null if both tiers fail
+// [day, night, water] — KTX2 first, JPEG fallback, null if both tiers fail.
+// Small screens skip KTX2 outright: at 1024px the JPEG set (177 KB) is
+// lighter than KTX2 (153 KB) + the 527 KB transcoder wasm it requires.
 async function loadTextureSet(renderer) {
-  const ktx2 = new KTX2Loader().setTranscoderPath(BASIS_PATH).detectSupport(renderer);
-  const loadK = url => new Promise((resolve, reject) => {
-    ktx2.load(url, tex => { tex.anisotropy = 8; resolve(tex); }, undefined, reject);
-  });
-  try {
-    return await Promise.all([
-      loadK(TEX_BASE + 'earth-day.ktx2'),
-      loadK(TEX_BASE + 'earth-night.ktx2'),
-      loadK(TEX_BASE + 'earth-water.ktx2'),
-    ]);
-  } catch (e) {
-    console.warn('KTX2 textures unavailable, falling back to JPEG:', e);
-  } finally {
-    ktx2.dispose();
+  if (!LOW_POWER) {
+    const ktx2 = new KTX2Loader().setTranscoderPath(BASIS_PATH).detectSupport(renderer);
+    const loadK = url => new Promise((resolve, reject) => {
+      ktx2.load(url, tex => { tex.anisotropy = 8; resolve(tex); }, undefined, reject);
+    });
+    try {
+      return await Promise.all([
+        loadK(TEX_BASE + `earth-day${TEX_SUFFIX}.ktx2`),
+        loadK(TEX_BASE + `earth-night${TEX_SUFFIX}.ktx2`),
+        loadK(TEX_BASE + `earth-water${TEX_SUFFIX}.ktx2`),
+      ]);
+    } catch (e) {
+      console.warn('KTX2 textures unavailable, falling back to JPEG:', e);
+    } finally {
+      ktx2.dispose();
+    }
   }
   try {
     return await Promise.all([
-      loadJPEG(TEX_BASE + 'earth-day.jpg', true),
-      loadJPEG(TEX_BASE + 'earth-night.jpg', true),
-      loadJPEG(TEX_BASE + 'earth-water.jpg', false),
+      loadJPEG(TEX_BASE + `earth-day${TEX_SUFFIX}.jpg`, true),
+      loadJPEG(TEX_BASE + `earth-night${TEX_SUFFIX}.jpg`, true),
+      loadJPEG(TEX_BASE + `earth-water${TEX_SUFFIX}.jpg`, false),
     ]);
   } catch (e) {
     console.warn('JPEG textures unavailable, keeping plain globe:', e);
@@ -140,7 +148,7 @@ export function createGlobe(renderer) {
 
   // Phong fallback: shown until textures arrive, kept if the CDN is down
   const material = new THREE.MeshPhongMaterial({ color: 0x1b2a4a, shininess: 8 });
-  const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 64, 64), material);
+  const globe = new THREE.Mesh(new THREE.SphereGeometry(R, SEG, SEG), material);
   group.add(globe);
 
   const sunUniform = { value: sunDirection() };
@@ -168,7 +176,7 @@ export function createGlobe(renderer) {
   // Fresnel rim atmosphere — thin halo at grazing angles, brighter on the
   // sunlit limb, additive so it never muddies the surface
   const atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(R * 1.045, 64, 64),
+    new THREE.SphereGeometry(R * 1.045, SEG, SEG),
     new THREE.ShaderMaterial({
       uniforms: {
         atmoColor: { value: new THREE.Color(0x4a7fdc) },
@@ -190,7 +198,7 @@ export function createGlobe(renderer) {
   // dark core hides far-side wireframe clutter; must stay smaller than the
   // deepest exaggerated quake radius (~67 units for 700 km) so points show
   const core = new THREE.Mesh(
-    new THREE.SphereGeometry(R * 0.6, 48, 48),
+    new THREE.SphereGeometry(R * 0.6, LOW_POWER ? 24 : 48, LOW_POWER ? 24 : 48),
     new THREE.MeshBasicMaterial({ color: 0x05070d })
   );
   core.visible = false;
