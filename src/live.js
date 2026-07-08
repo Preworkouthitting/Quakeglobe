@@ -45,44 +45,78 @@ export class LiveUpdater {
 }
 
 // Expanding one-shot shockwave rings for newly arrived quakes.
+// ONE InstancedMesh with round-robin slots; expansion + fade run in the
+// vertex shader off a uTime uniform — one draw call, zero per-frame CPU.
+const SHOCK_CAP = 64;
+const SHOCK_LIFE = 2.8;
+
 export class Shockwaves {
   constructor(parent) {
-    this.group = new THREE.Group();
-    parent.add(this.group);
-    this.geo = new THREE.RingGeometry(0.96, 1, 48);
-    this.active = []; // { mesh, age, life, maxScale }
+    const geo = new THREE.RingGeometry(0.96, 1, 48);
+    geo.setAttribute('birth', new THREE.InstancedBufferAttribute(new Float32Array(SHOCK_CAP).fill(-1e9), 1));
+    geo.setAttribute('maxScale', new THREE.InstancedBufferAttribute(new Float32Array(SHOCK_CAP), 1));
+    this.material = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        attribute float birth;
+        attribute float maxScale;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          vColor = instanceColor;
+          float t = clamp((uTime - birth) / ${SHOCK_LIFE}, 0.0, 1.0);
+          float e = 1.0 - pow(1.0 - t, 2.2); // fast start, gentle finish
+          vAlpha = 0.95 * (1.0 - t);
+          vec3 p = position;
+          p.xy *= 1.0 + e * maxScale;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() { gl_FragColor = vec4(vColor, vAlpha); }`,
+    });
+    this.mesh = new THREE.InstancedMesh(geo, this.material, SHOCK_CAP);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(SHOCK_CAP * 3), 3);
+    this.mesh.count = 0;
+    this.mesh.frustumCulled = false; // shader-scaled; bounds are stale
+    parent.add(this.mesh);
+    this.nextSlot = 0;
+    this.now = 0;
+    this.activeUntil = -1; // for the idle-render activity predicate
   }
 
   spawn(normal, color, mag = 4) {
-    const mesh = new THREE.Mesh(
-      this.geo,
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color(color).multiplyScalar(2.2), // HDR → strong bloom
-        transparent: true, opacity: 0.95, side: THREE.DoubleSide,
-      })
+    const slot = this.nextSlot;
+    this.nextSlot = (this.nextSlot + 1) % SHOCK_CAP;
+    this.mesh.count = Math.max(this.mesh.count, slot + 1);
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    const m = new THREE.Matrix4().compose(
+      normal.clone().multiplyScalar(R + 0.4), q, new THREE.Vector3(1, 1, 1)
     );
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-    mesh.position.copy(normal).multiplyScalar(R + 0.4);
-    this.group.add(mesh);
-    this.active.push({ mesh, age: 0, life: 2.8, maxScale: Math.max(8, mag * 3.5) });
+    this.mesh.setMatrixAt(slot, m);
+    this.mesh.setColorAt(slot, new THREE.Color(color).multiplyScalar(2.2)); // HDR → strong bloom
+    const attrs = this.mesh.geometry.attributes;
+    attrs.birth.setX(slot, this.now);
+    attrs.maxScale.setX(slot, Math.max(8, mag * 3.5));
+    attrs.birth.needsUpdate = true;
+    attrs.maxScale.needsUpdate = true;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor.needsUpdate = true;
+    this.activeUntil = this.now + SHOCK_LIFE;
   }
 
-  update(_, dt) {
-    for (let i = this.active.length - 1; i >= 0; i--) {
-      const w = this.active[i];
-      w.age += dt;
-      const t = w.age / w.life;
-      if (t >= 1) {
-        this.group.remove(w.mesh);
-        w.mesh.material.dispose();
-        this.active.splice(i, 1);
-        continue;
-      }
-      const eased = 1 - Math.pow(1 - t, 2.2); // fast start, gentle finish
-      const s = 1 + eased * w.maxScale;
-      w.mesh.scale.set(s, s, s);
-      w.mesh.material.opacity = 0.95 * (1 - t);
-    }
+  isActive() {
+    return this.now < this.activeUntil;
+  }
+
+  update(t) {
+    this.now = t;
+    this.material.uniforms.uTime.value = t;
   }
 }
 

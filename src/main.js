@@ -29,8 +29,8 @@ const ping = new Ping();
 // Things that force full-rate rendering while they animate (idle limiter)
 app.addActivity(() => timeline.playing);
 app.addActivity(() => markers.flashing.size > 0);
-app.addActivity(() => markers.ringGroup.visible && markers.pulseRings.some(r => r.visible));
-app.addActivity(() => shockwaves.active.length > 0);
+app.addActivity(() => markers.ringsAnimating());
+app.addActivity(() => shockwaves.isActive());
 app.addActivity(() => performance.now() - lastPointerMove < 120);
 
 // ---------- Timeline ----------

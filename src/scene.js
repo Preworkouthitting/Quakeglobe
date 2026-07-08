@@ -59,24 +59,55 @@ export function createScene(container) {
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.35;
 
-  // Star field — three brightness/size tiers so it reads as depth, not noise
+  // Star field — three brightness/size tiers in ONE draw call via a
+  // per-vertex size attribute (PointsMaterial only supports a single size)
+  const starScale = { value: innerHeight / 2 }; // sizeAttenuation factor
   {
     const tiers = [
       { count: 750, size: 0.8, color: 0x6b7a99 },  // faint background dust
       { count: 350, size: 1.4, color: 0x9fb0cc },  // mid stars
       { count: 120, size: 2.2, color: 0xd8e2f5 },  // a few bright ones
     ];
+    const total = tiers.reduce((s, t) => s + t.count, 0);
+    const pos = new Float32Array(total * 3);
+    const col = new Float32Array(total * 3);
+    const size = new Float32Array(total);
+    let i = 0;
+    const c = new THREE.Color();
     for (const tier of tiers) {
-      const pts = [];
-      for (let i = 0; i < tier.count; i++) {
+      c.set(tier.color);
+      for (let k = 0; k < tier.count; k++, i++) {
         const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2;
         const s = Math.sqrt(1 - u * u), d = 800 + Math.random() * 400;
-        pts.push(s * Math.cos(a) * d, s * Math.sin(a) * d, u * d);
+        pos[i * 3] = s * Math.cos(a) * d;
+        pos[i * 3 + 1] = s * Math.sin(a) * d;
+        pos[i * 3 + 2] = u * d;
+        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        size[i] = tier.size;
       }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: tier.color, size: tier.size, sizeAttenuation: true })));
     }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('size', new THREE.BufferAttribute(size, 1));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uScale: starScale },
+      vertexColors: true,
+      vertexShader: /* glsl */ `
+        attribute float size;
+        uniform float uScale;
+        varying vec3 vColor;
+        void main() {
+          vColor = color;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * (uScale / -mv.z);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vColor;
+        void main() { gl_FragColor = vec4(vColor, 1.0); }`,
+    });
+    scene.add(new THREE.Points(g, mat));
   }
 
   addEventListener('resize', () => {
@@ -86,6 +117,7 @@ export function createScene(container) {
     composer.setPixelRatio(targetPixelRatio());
     renderer.setSize(innerWidth, innerHeight);
     composer.setSize(innerWidth, innerHeight);
+    starScale.value = innerHeight / 2;
   });
 
   // Smooth great-circle camera flight: slerp the view direction, ease the

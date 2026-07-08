@@ -41,6 +41,7 @@ const _ray = new THREE.Ray();
 const _wp = new THREE.Vector3();
 const WHITE = new THREE.Color(0xffffff);
 const UP = new THREE.Vector3(0, 1, 0);
+const FORWARD = new THREE.Vector3(0, 0, 1);
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
 // All quake data lives in typed arrays straight from the feed worker (SoA).
@@ -72,13 +73,45 @@ export class QuakeMarkers {
     parent.add(this.depthMesh);
     this.mode = 'surface'; // 'surface' | 'depth'
 
-    this.ringGroup = new THREE.Group();
-    parent.add(this.ringGroup);
-    this.ringGeo = new THREE.RingGeometry(1, 1.35, 32);
+    // Pulse rings for recent quakes: ONE InstancedMesh, animated entirely in
+    // the vertex shader (uTime uniform + per-instance phase) — one draw call
+    // and zero per-frame CPU, however many rings exist.
+    const RING_CAP = 256;
+    const ringGeo = new THREE.RingGeometry(1, 1.35, 32);
+    ringGeo.setAttribute('phase', new THREE.InstancedBufferAttribute(new Float32Array(RING_CAP), 1));
+    this.ringMaterial = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      vertexShader: /* glsl */ `
+        uniform float uTime;
+        attribute float phase;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          vColor = instanceColor;
+          float w = sin(uTime * 3.0 + phase);
+          vAlpha = 0.35 + 0.35 * w;
+          vec3 p = position;
+          p.xy *= 1.0 + 0.5 * w;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: /* glsl */ `
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() { gl_FragColor = vec4(vColor, vAlpha); }`,
+    });
+    this.ringMesh = new THREE.InstancedMesh(ringGeo, this.ringMaterial, RING_CAP);
+    this.ringMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(RING_CAP * 3), 3);
+    this.ringMesh.count = 0;
+    this.ringMesh.frustumCulled = false; // shader-scaled; bounds are stale
+    parent.add(this.ringMesh);
+    this.ringIndex = []; // ring slot → quake index
+    this.shownRings = 0;
 
     this.buf = null;          // SoA arrays from the worker
     this.shown = new Uint8Array(0);
-    this.pulseRings = [];
     this.minMag = 0;
     this.timeCutoff = Infinity;
     this.flashing = new Set(); // instance ids currently flashing
@@ -181,7 +214,7 @@ export class QuakeMarkers {
     this.mode = mode;
     this.mesh.visible = mode === 'surface';
     this.depthMesh.visible = mode === 'depth';
-    this.ringGroup.visible = mode === 'surface';
+    this.ringMesh.visible = mode === 'surface';
     this.updateVisibility();
   }
 
@@ -219,32 +252,54 @@ export class QuakeMarkers {
       if (on) this.writeMatrix(i);
       else mesh.setMatrixAt(i, ZERO);
     }
-    for (const ring of this.pulseRings) ring.visible = this.shown[ring.userData.index] === 1;
+    // rings of filtered-out quakes collapse to zero scale
+    this.shownRings = 0;
+    for (let slot = 0; slot < this.ringIndex.length; slot++) {
+      if (this.shown[this.ringIndex[slot]]) {
+        this.writeRingMatrix(slot);
+        this.shownRings++;
+      } else {
+        this.ringMesh.setMatrixAt(slot, ZERO);
+      }
+    }
+    if (this.ringIndex.length) this.ringMesh.instanceMatrix.needsUpdate = true;
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
   }
 
   addPulseRing(i) {
+    const slot = this.ringIndex.length;
+    if (slot >= this.ringMesh.instanceMatrix.count) return; // capacity guard
+    this.ringIndex.push(i);
+    this.ringMesh.count = this.ringIndex.length;
     const b = this.buf;
-    const color = new THREE.Color().setRGB(b.surfColors[i * 3], b.surfColors[i * 3 + 1], b.surfColors[i * 3 + 2])
-      .multiplyScalar(1.7); // HDR → blooms
-    const ring = new THREE.Mesh(
-      this.ringGeo,
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
-    );
+    _color.setRGB(b.surfColors[i * 3], b.surfColors[i * 3 + 1], b.surfColors[i * 3 + 2]).multiplyScalar(1.7); // HDR → blooms
+    this.ringMesh.setColorAt(slot, _color);
+    this.ringMesh.geometry.attributes.phase.setX(slot, slot); // matches old per-ring offset
+    this.ringMesh.geometry.attributes.phase.needsUpdate = true;
+    this.writeRingMatrix(slot);
+    this.ringMesh.instanceColor.needsUpdate = true;
+  }
+
+  writeRingMatrix(slot) {
+    const i = this.ringIndex[slot];
+    const b = this.buf;
     _normal.set(b.normals[i * 3], b.normals[i * 3 + 1], b.normals[i * 3 + 2]);
-    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), _normal);
-    ring.position.copy(_normal).multiplyScalar(R + 0.3);
-    ring.userData.baseScale = Math.max(1.5, b.mags[i] * 1.2);
-    ring.userData.index = i;
-    this.ringGroup.add(ring);
-    this.pulseRings.push(ring);
+    _quat.setFromUnitVectors(FORWARD, _normal);
+    const s = Math.max(1.5, b.mags[i] * 1.2);
+    _mat4.compose(_pos.copy(_normal).multiplyScalar(R + 0.3), _quat, _scale.setScalar(s));
+    this.ringMesh.setMatrixAt(slot, _mat4);
   }
 
   clearRings() {
-    this.pulseRings.forEach(r => r.material.dispose());
-    this.ringGroup.clear();
-    this.pulseRings = [];
+    this.ringIndex = [];
+    this.ringMesh.count = 0;
+    this.shownRings = 0;
+  }
+
+  // true while any visible ring is pulsing (idle limiter hook)
+  ringsAnimating() {
+    return this.ringMesh.visible && this.shownRings > 0;
   }
 
   // write the pristine (worker-computed) color for instance i back into the
@@ -310,12 +365,7 @@ export class QuakeMarkers {
   }
 
   update(t) {
-    for (let i = 0; i < this.pulseRings.length; i++) {
-      const r = this.pulseRings[i];
-      const s = r.userData.baseScale * (1 + 0.5 * Math.sin(t * 3 + i));
-      r.scale.set(s, s, s);
-      r.material.opacity = 0.35 + 0.35 * Math.sin(t * 3 + i);
-    }
+    this.ringMaterial.uniforms.uTime.value = t; // rings animate in-shader
 
     if (this.flashing.size) {
       const mesh = this.activeMesh;
