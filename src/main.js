@@ -8,6 +8,7 @@ import { LiveUpdater, Shockwaves, Ping } from './live.js';
 import { magColor } from './markers.js';
 import { Timeline } from './timeline.js';
 import { updateHash, readHash } from './deeplink.js';
+import { renderCharts } from './charts.js';
 import * as ui from './ui.js';
 
 const app = createScene(document.getElementById('canvas-wrap'));
@@ -50,12 +51,18 @@ function selectQuake(q, { fly = true } = {}) {
   updateDeepLink();
 }
 
+function refreshCharts() {
+  const minMag = parseFloat(ui.els.minMag.value);
+  renderCharts(ui.els.charts, markers.quakes.filter(q => q.mag >= minMag), timeline.start, timeline.end);
+}
+
 function applyFeatures(features) {
   markers.setData(features);
   const extent = markers.timeExtent();
   if (extent) timeline.setWindow(extent[0], extent[1]);
   ui.updateStats(markers.visibleStats());
   ui.renderSigList(markers.quakes, q => selectQuake(q));
+  refreshCharts();
   if (pendingQuakeId) {
     const q = markers.quakes.find(x => x.feature.id === pendingQuakeId);
     pendingQuakeId = null;
@@ -241,6 +248,7 @@ ui.els.minMag.addEventListener('input', e => {
   ui.els.magVal.textContent = v.toFixed(1);
   markers.setMinMag(v);
   ui.updateStats(markers.visibleStats());
+  refreshCharts();
   updateDeepLink();
 });
 ui.els.spin.addEventListener('change', e => {

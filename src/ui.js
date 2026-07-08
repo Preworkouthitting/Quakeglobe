@@ -24,6 +24,7 @@ export const els = {
   sound: $('sound'),
   toast: $('toast'),
   sigList: $('sigList'),
+  charts: $('charts'),
   banner: $('banner'),
   histBox: $('histBox'),
   histStart: $('histStart'),

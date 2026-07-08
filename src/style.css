@@ -75,6 +75,15 @@ details.ctrl summary:hover { color: #dfe6f0; }
 #sigList li:hover { background: rgba(255,140,66,0.12); }
 #sigList .m { font-weight: 700; color: #ff8c42; flex-shrink: 0; width: 38px; }
 #sigList .p { color: #9fb0cc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#statsBox { margin-top: 10px; border-top: 1px solid rgba(120,160,255,0.15); padding-top: 8px; }
+#statsBox summary {
+  font-size: 11px; color: #9fb0cc; text-transform: uppercase; letter-spacing: 0.6px;
+  cursor: pointer; user-select: none;
+}
+#statsBox summary:hover { color: #dfe6f0; }
+.chart { margin-top: 8px; }
+.chart-title { font-size: 10px; color: #7d8aa5; margin-bottom: 2px; }
+.chart svg { width: 100%; display: block; }
 
 #detail {
   position: fixed; top: 16px; right: 282px; width: 270px; z-index: 12; display: none;

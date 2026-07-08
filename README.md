@@ -34,6 +34,14 @@ and live updates with shockwave animations.
 
   ![New quake shockwave](docs/shockwave.jpg)
 
+- **Historical queries** — any date range back to ~1900 via the USGS
+  fdsnws archive, with magnitude floor and region presets. Try Japan,
+  March 2011: the M9.1 Tōhoku sequence, replayable on the timeline
+- **Deep links** — feed or archive query, filters, camera and selected
+  quake live in the URL hash, so any view is shareable:
+  `#h=2011-03-01~2011-04-01~5~japan&q=official20110311054624120_30`
+- **Stats** — collapsible sidebar charts (hand-rolled SVG, no chart
+  library): magnitude histogram, quakes-over-time, depth distribution
 - **Significant-quake sidebar** — top 10 by magnitude; click to fly the
   camera there on a smooth great-circle path
 - **Mobile** — touch rotate / pinch zoom; panels collapse into a bottom sheet
@@ -67,8 +75,11 @@ src/
                     + one for depth spheres; raycast picking via instanceId;
                     zero-scale matrices hide filtered/not-yet-occurred quakes
   plates.js         plate boundaries as a single LineSegments draw call
-  data.js           USGS GeoJSON fetch, 5-min cache, retry with backoff
+  data.js           USGS GeoJSON fetch (feeds + fdsnws archive queries),
+                    5-min cache, retry with backoff
   timeline.js       scrubber playback state
+  deeplink.js       shareable app state in the URL hash
+  charts.js         hand-rolled SVG stats charts
   live.js           5-min refresh diffing, shockwaves, WebAudio ping
   ui.js             DOM helpers: tooltip, detail card, toast, banner, sidebar
   assets/
