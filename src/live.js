@@ -86,11 +86,20 @@ export class Shockwaves {
     this.mesh.frustumCulled = false; // shader-scaled; bounds are stale
     parent.add(this.mesh);
     this.nextSlot = 0;
-    this.now = 0;
+    this.rawNow = 0;   // absolute elapsed seconds
+    this.epoch = 0;    // subtracted before upload (fp32 precision)
+    this.now = 0;      // rebased time, matches the birth attribute values
     this.activeUntil = -1; // for the idle-render activity predicate
   }
 
   spawn(normal, color, mag = 4) {
+    // rebase the shader clock whenever no wave is mid-flight, so uTime and
+    // birth stay small — large absolute times lose precision in fp32
+    if (!this.isActive()) {
+      this.epoch = this.rawNow;
+      this.now = 0;
+      this.material.uniforms.uTime.value = 0;
+    }
     const slot = this.nextSlot;
     this.nextSlot = (this.nextSlot + 1) % SHOCK_CAP;
     this.mesh.count = Math.max(this.mesh.count, slot + 1);
@@ -115,8 +124,9 @@ export class Shockwaves {
   }
 
   update(t) {
-    this.now = t;
-    this.material.uniforms.uTime.value = t;
+    this.rawNow = t;
+    this.now = t - this.epoch;
+    this.material.uniforms.uTime.value = this.now;
   }
 }
 

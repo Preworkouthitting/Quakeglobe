@@ -384,7 +384,10 @@ export class QuakeMarkers {
   }
 
   update(t) {
-    this.ringMaterial.uniforms.uTime.value = t; // rings animate in-shader
+    // sin(3t+φ) is periodic in t with period 2π/3 — wrap before upload, or
+    // after hours of session time fp32 sin() precision collapses on the GPU
+    // and the rings warp and fade out
+    this.ringMaterial.uniforms.uTime.value = t % (Math.PI * 2 / 3);
 
     if (this.flashing.size) {
       const mesh = this.activeMesh;
