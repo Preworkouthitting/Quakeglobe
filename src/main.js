@@ -328,9 +328,9 @@ ui.els.depthMode.addEventListener('change', e => {
       ui.els.plates.dispatchEvent(new Event('change'));
     }
     if (initial.cam) {
+      // restore the shared framing, but auto-rotate stays on — it drifts
+      // gently from the linked view rather than freezing the globe
       initialCamera = true;
-      ui.els.spin.checked = false; // hold the shared framing
-      app.controls.autoRotate = false;
       const dist = Math.min(Math.max(initial.cam[2], 130), 600);
       app.camera.position.copy(latLonToVec3(initial.cam[0], initial.cam[1], dist));
       app.controls.update();
