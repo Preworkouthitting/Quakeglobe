@@ -51,8 +51,8 @@ events) loaded, dpr 1.
 | Allocation rate, rotate idle (12 s) | 9,950 KB/s, 35 GC scavenges | 1,449 KB/s, 6 | ~7× less churn |
 | Allocation rate, timeline playback (12 s) | 9,804 KB/s, 23 GC | 1,521 KB/s, 19 GC | ~6× |
 | Per-call allocation: `composer.render` / `controls.update` / `markers.update` | — | **0 bytes** | measured over 200–500 calls |
-| JS heap after all_month (post-GC floor) | ~75 MB | ~77 MB (JPEG) / ~82 MB (KTX2) | ~flat; +5 MB is transcoded KTX2 block data, offset by 6× less GPU texture memory |
-| Texture payload | 2,546 KB (unpkg CDN) | **420 KB** KTX2 / 586 KB JPEG fallback, self-hosted | 6× smaller, GPU-compressed |
+| JS heap after all_month (post-GC floor) | ~75 MB | ~77 MB | ~flat: SoA savings offset by pick-sphere/BVH arrays |
+| Texture payload | 2,546 KB (unpkg CDN) | **586 KB** (2048px) / 177 KB (1024px mobile), self-hosted JPEG | 4–14× smaller |
 | Lighthouse performance (prod preview) | 75 (TBT 1,060 ms) | **84** (TBT 487 ms) | FCP/LCP ~2.1 s unchanged — dominated by the three.js bundle parse; code-splitting was out of scope |
 
 New behavior (no visual change when active):
@@ -75,5 +75,10 @@ all pass. Prod bundle contains no FPS meter, no `__quake` dev handle, no
 encoder code (verified by grep).
 
 Repro notes: FPS meter (dev only) shows real post-limiter render rate;
-`scripts/encode-ktx2.js` regenerates the KTX2 textures from the dev page
-console. Lighthouse runs against `vite preview` on the built dist.
+Lighthouse runs against `vite preview` on the built dist.
+
+Post-script: the pass originally shipped KTX2 (Basis) textures with a JPEG
+fallback. They were removed when the strict CSP landed — three's basis
+transcoder glue calls eval() internally (blocked by design), and the KTX2
+path was heavier over the wire anyway (421 KB textures + 584 KB transcoder
+vs 586 KB of plain JPEG). Responsive JPEGs serve both breakpoints now.

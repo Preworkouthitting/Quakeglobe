@@ -14,8 +14,6 @@
     "three-mesh-bvh": "0.9.10"
   },
   "devDependencies": {
-    "@loaders.gl/core": "^4.4.3",
-    "@loaders.gl/textures": "^4.4.3",
     "vite": "8.1.3"
   }
 }

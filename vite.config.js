@@ -42,15 +42,15 @@ function snapshotPlugin() {
 
 // Production only: GitHub Pages can't send response headers, so the CSP
 // ships as a <meta> tag injected at build time (a meta CSP in dev would
-// break Vite's HMR websocket). 'wasm-unsafe-eval' is required by the basis
-// transcoder; blob: workers are spawned by KTX2Loader; data: images cover
-// the inline SVG favicon; 'unsafe-inline' styles cover style attributes
-// (legend dots, tooltip positioning). frame-ancestors can't be set via
-// meta — accepted residual, Pages can't send headers at all.
+// break Vite's HMR websocket). data: images cover the inline SVG favicon;
+// 'unsafe-inline' styles cover style attributes (legend dots, tooltip
+// positioning). frame-ancestors can't be set via meta — accepted residual,
+// Pages can't send headers at all. (KTX2/basis was removed partly because
+// its Emscripten glue needed 'unsafe-eval' — this policy stays strict.)
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'wasm-unsafe-eval'",
-  "worker-src 'self' blob:",
+  "script-src 'self'",
+  "worker-src 'self'",
   "connect-src 'self' https://earthquake.usgs.gov",
   "img-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
